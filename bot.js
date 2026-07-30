@@ -505,6 +505,15 @@ bot.action("adm_clean", async (ctx) => {
 
 // Botni ishga tushirish qismi bundan keyin keladi:
 bot.launch();
+// Botni ishga tushirish va eski qotib qolgan so'rovlarni tozalash
+bot.launch({
+  dropPendingUpdates: true
+}).then(() => {
+    console.log('Бот ишга тушди!');
+});
+
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
 console.log("🔥 Professional bot muvaffaqiyatli ishga tushdi!");
 
 
