@@ -1,9 +1,9 @@
 const { Telegraf, Markup } = require('telegraf');
 
-const BOT_TOKEN = "7993407351:AAE4ORrWoe-16bO6rs6FFMGx5cC_5ofMeOA";
+const BOT_TOKEN = "7993407351:AAGT-Z9v30zfhM1BpGU2M1Q4hzdSUNZNW0M";
 const ADMIN_ID = 867717817;
 
-const bot = new Telegraf("7993407351:AAE4ORrWoe-16bO6rs6FFMGx5cC_5ofMeOA");
+const bot = new Telegraf("7993407351:AAGT-Z9v30zfhM1BpGU2M1Q4hzdSUNZNW0M");
 const userState = {};
 const allUsers = new Set();
 
