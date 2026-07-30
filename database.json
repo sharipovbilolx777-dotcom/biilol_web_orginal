@@ -1,0 +1,43 @@
+{
+  "users": {
+    "867717817": {
+      "lang": "uz",
+      "state": "WAITING_FULLNAME",
+      "hasPlayed": false,
+      "orderData": {
+        "service": "Telegram Bot",
+        "fio": "bilol sharipov",
+        "phone": "+998993212122"
+      },
+      "orderDraft": {},
+      "winningBox": 2,
+      "hasPlayedGame": true
+    }
+  },
+  "orders": [],
+  "reviews": [
+    {
+      "userId": 867717817,
+      "score": "3",
+      "text": "Star rating only",
+      "date": "2026-07-30T12:03:09.786Z"
+    }
+  ],
+  "statistics": {
+    "totalUsers": 0,
+    "todayUsers": 0,
+    "totalOrders": 0,
+    "totalReviews": 0,
+    "promoUsed": 0,
+    "activeUsers": 0,
+    "totalMessages": 11
+  },
+  "settings": {
+    "cardNumber": "5614 6821 1739 5444",
+    "cardOwner": "N.M",
+    "maintenance": false
+  },
+  "promo": {},
+  "game": {},
+  "discounts": {}
+}
