@@ -640,6 +640,8 @@ bot.on('contact', async (ctx) => {
     const userId = ctx.from.id;
     const state = userState[userId] || {};
     
+    console.log("📥 Kontakt keldi, adminga yuborish boshlandi. User ID:", userId);
+
     const fullName = state.clientFullName || user.first_name;
     const service = state.pendingService ? state.pendingService : "Umumiy murojaat";
     const orderDesc = state.orderDescription || "Ko'rsatilmagan";
@@ -657,10 +659,12 @@ bot.on('contact', async (ctx) => {
                          `🏷 *Aksiya holati:* ${discount}\n` +
                          `✅ *Shartlar:* 50% oldindan to'lovga rozilik olindi`;
 
-    // bot.telegram o'rniga ctx.telegram ishlashi to'g'irlandi
-    await ctx.telegram.sendMessage(ADMIN_ID, adminMessage, { parse_mode: 'Markdown' }).catch((e) => {
-        console.log("Adminga yuborishda xato:", e.message);
-    });
+    try {
+        await ctx.telegram.sendMessage(ADMIN_ID, adminMessage, { parse_mode: 'Markdown' });
+        console.log("✅ Xabar adminga muvaffaqiyatli yuborildi!");
+    } catch (e) {
+        console.log("❌ ADMINGA YUBORISHDA XATOLIK:", e.message);
+    }
     
     await ctx.reply("Rahmat! Ma'lumotlaringiz muvaffaqiyatli qabul qilindi. Tez orada mutaxassisimiz siz bilan bog'lanib, narxlarni kelishadi! ✅", getMainMenu(state.lang || 'uz'));
 
