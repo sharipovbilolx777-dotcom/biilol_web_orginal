@@ -162,7 +162,7 @@ bot.action('adm_clean', async (ctx) => {
 
     for (const id of allUsers) {
         try {
-            await bot.telegram.sendChatAction(id, "typing");
+            await ctx.telegram.sendChatAction(id, "typing");
             active++;
         } catch (e) {
             allUsers.delete(id);
@@ -469,7 +469,7 @@ bot.on(['text', 'photo', 'video', 'document', 'audio', 'animation'], async (ctx,
         );
     }
 
-    // 3. Budjet tekshiruvi ($100, 100$ va so'mlarni to'g'ri o'qiydigan qilib tuzatildi)
+    // 3. Budjet tekshiruvi
     if (userState[userId].waitingForBudget && ctx.message && ctx.message.text) {
         const budgetText = ctx.message.text.trim();
         
@@ -511,7 +511,7 @@ bot.on(['text', 'photo', 'video', 'document', 'audio', 'animation'], async (ctx,
                           `👤 Kimdan: ${user.first_name} (@${user.username || 'yoq'})\n` +
                           `🆔 Telegram ID: \`${user.id}\`\n` +
                           `📝 Fikr matni: _"${reviewText}"_`;
-        bot.telegram.sendMessage(ADMIN_ID, adminText, { parse_mode: 'Markdown' }).catch(() => {});
+        ctx.telegram.sendMessage(ADMIN_ID, adminText, { parse_mode: 'Markdown' }).catch(() => {});
         return ctx.reply("✅ Fikringiz uchun rahmat! Adminga yetkazildi. 🙏");
     }
 
@@ -528,7 +528,7 @@ bot.on(['text', 'photo', 'video', 'document', 'audio', 'animation'], async (ctx,
         }
     }
 
-    // 5. Universal Reklama tarqatish (Kanalga + Foydalanuvchilarga)
+    // 5. Universal Reklama tarqatish
     if (userId.toString() === ADMIN_ID && userState[userId].waitingForBroadcast) {
         userState[userId].waitingForBroadcast = false;
         
@@ -657,7 +657,10 @@ bot.on('contact', async (ctx) => {
                          `🏷 *Aksiya holati:* ${discount}\n` +
                          `✅ *Shartlar:* 50% oldindan to'lovga rozilik olindi`;
 
-    await bot.telegram.sendMessage(ADMIN_ID, adminMessage, { parse_mode: 'Markdown' }).catch(() => {});
+    // bot.telegram o'rniga ctx.telegram ishlashi to'g'irlandi
+    await ctx.telegram.sendMessage(ADMIN_ID, adminMessage, { parse_mode: 'Markdown' }).catch((e) => {
+        console.log("Adminga yuborishda xato:", e.message);
+    });
     
     await ctx.reply("Rahmat! Ma'lumotlaringiz muvaffaqiyatli qabul qilindi. Tez orada mutaxassisimiz siz bilan bog'lanib, narxlarni kelishadi! ✅", getMainMenu(state.lang || 'uz'));
 
