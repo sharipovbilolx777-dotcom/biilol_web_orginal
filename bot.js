@@ -1,7 +1,6 @@
 'use strict';
 
 const { Telegraf, Markup } = require('telegraf');
-
 const BOT_TOKEN = "7993407351:AAGT-Z9v30zfhM1BpGU2M1Q4hzdSUNZNW0M";
 const ADMIN_ID = "867717817";
 const ADMIN_PASSWORD = "7777";
