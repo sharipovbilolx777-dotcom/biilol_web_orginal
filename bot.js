@@ -4,2904 +4,1388 @@ const { Telegraf, Markup } = require('telegraf');
 const Database = require('better-sqlite3');
 
 // ============================================================
-// BILOL | WEB DEVELOPER — PROFESSIONAL TELEGRAM BOT
+// CONFIG
 // ============================================================
-
-const BOT_TOKEN = '8774770545:AAGQR4qQiWWf5AC-5OYvVhzHWkju9udZUgw';
+const BOT_TOKEN = process.env.BOT_TOKEN || '8774770545:AAGQR4qQiWWf5AC-5OYvVhzHWkju9udZUgw';
 const ADMIN_ID = '867717817';
 const ADMIN_PASSWORD = '7777';
 
-const CHANNEL_USERNAME = '@webuzbekistan';
+const TARGET_CHANNEL = '@webuzbekistan';
 const CHANNEL_URL = 'https://t.me/webuzbekistan';
 const INSTAGRAM_URL = 'https://www.instagram.com/webi.uz';
 const ADMIN_USERNAME = 'https://t.me/sharipoov1';
-const ADMIN_PHONE = '+998993212122';
+const PHONE_MAIN = '+998993212122';
 
 const bot = new Telegraf(BOT_TOKEN);
 const db = new Database('bilol_bot.db');
-
 db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
-
-const START_TIME = Date.now();
 
 // ============================================================
 // DATABASE
 // ============================================================
-
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
-    first_name TEXT DEFAULT '',
-    last_name TEXT DEFAULT '',
-    username TEXT DEFAULT '',
-    phone TEXT DEFAULT '',
-    phone2 TEXT DEFAULT '',
+    first_name TEXT,
+    last_name TEXT,
+    username TEXT,
+    phone TEXT,
+    second_phone TEXT,
     language TEXT DEFAULT 'uz',
-
-    subscribed INTEGER DEFAULT 0,
+    subscribed_channel INTEGER DEFAULT 0,
     instagram_confirmed INTEGER DEFAULT 0,
-    onboarding_completed INTEGER DEFAULT 0,
-
-    blocked INTEGER DEFAULT 0,
-    block_reason TEXT DEFAULT '',
-
-    has_played INTEGER DEFAULT 0,
+    phone_verified INTEGER DEFAULT 0,
+    is_blocked INTEGER DEFAULT 0,
+    game_played INTEGER DEFAULT 0,
     has_discount INTEGER DEFAULT 0,
-    promo_code TEXT DEFAULT '',
-
-    state TEXT DEFAULT '',
-
-    pending_service TEXT DEFAULT '',
-    client_full_name TEXT DEFAULT '',
-    order_description TEXT DEFAULT '',
-    detected_service TEXT DEFAULT '',
-    min_price INTEGER DEFAULT 0,
-    client_budget TEXT DEFAULT '',
-
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    registered_at TEXT DEFAULT CURRENT_TIMESTAMP,
     last_seen TEXT DEFAULT CURRENT_TIMESTAMP
 );
-
-CREATE TABLE IF NOT EXISTS reviews (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    rating INTEGER DEFAULT 0,
-    text TEXT DEFAULT '',
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS complaints (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    text TEXT DEFAULT '',
-    status TEXT DEFAULT 'new',
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
-    service TEXT DEFAULT '',
-    full_name TEXT DEFAULT '',
-    description TEXT DEFAULT '',
-    budget TEXT DEFAULT '',
-    phone TEXT DEFAULT '',
-    phone2 TEXT DEFAULT '',
-    discount TEXT DEFAULT '',
+    full_name TEXT,
+    username TEXT,
+    phone TEXT,
+    second_phone TEXT,
+    service TEXT,
+    description TEXT,
+    budget TEXT,
+    estimated_service TEXT,
+    minimum_price TEXT,
+    discount TEXT,
     status TEXT DEFAULT 'new',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
-
-CREATE TABLE IF NOT EXISTS bot_data (
-    key TEXT PRIMARY KEY,
-    value TEXT DEFAULT ''
+CREATE TABLE IF NOT EXISTS reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    rating INTEGER,
+    review_text TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS complaints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    complaint_text TEXT,
+    status TEXT DEFAULT 'new',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS broadcasts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_type TEXT,
+    success_count INTEGER DEFAULT 0,
+    fail_count INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS menu_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title_uz TEXT,
+    title_ru TEXT,
+    title_en TEXT,
+    action TEXT,
+    sort_order INTEGER DEFAULT 0,
+    active INTEGER DEFAULT 1
 );
 `);
 
-// ============================================================
-// DEFAULT BOT DATA
-// ============================================================
-
-const defaultData = {
-    phone: ADMIN_PHONE,
-    telegram: '@sharipoov1',
-    instagram: '@webi.uz',
-    channel: '@webuzbekistan'
-};
-
-for (const [key, value] of Object.entries(defaultData)) {
-    db.prepare(`
-        INSERT OR IGNORE INTO bot_data (key, value)
-        VALUES (?, ?)
-    `).run(key, value);
-}
-
-function getBotData(key) {
-    const row = db.prepare('SELECT value FROM bot_data WHERE key = ?').get(key);
-    return row ? row.value : '';
-}
-
-function setBotData(key, value) {
-    db.prepare(`
-        INSERT INTO bot_data (key, value)
-        VALUES (?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `).run(key, value);
+// Default menu
+const defaultMenu = [
+    ['💻 Bizning ishlar (Portfolio)', '💻 Портфолио проектов', '💻 Portfolio', 'portfolio', 1],
+    ['⚙️ Xizmatlar va Narxlar', '⚙️ Услуги и Прайс', '⚙️ Services & Pricing', 'services', 2],
+    ['🎮 15% Chegirma o‘yini', '🎮 Игра на скидку 15%', '🎮 Win 15% Discount', 'game', 3],
+    ['⭐️ Mijozlar fikri', '⭐️ Отзывы клиентов', '⭐️ Client Reviews', 'reviews', 4],
+    ['📞 Biz bilan bog‘lanish', '📞 Контакты', '📞 Contacts', 'contacts', 5],
+    ['📝 Shikoyat qoldirish', '📝 Жалоба', '📝 Complaint', 'complaint', 6],
+    ['💻 Loyihaga buyurtma', '💻 Заказать проект', '💻 Order Project', 'order', 7],
+    ['🌐 Tilni o‘zgartirish', '🌐 Изменить язык', '🌐 Change Language', 'language', 8]
+];
+const menuCount = db.prepare(`SELECT COUNT(*) AS c FROM menu_items`).get();
+if (menuCount.c === 0) {
+    const ins = db.prepare(`INSERT INTO menu_items (title_uz,title_ru,title_en,action,sort_order) VALUES (?,?,?,?,?)`);
+    const tx = db.transaction(() => { for (const m of defaultMenu) ins.run(...m); });
+    tx();
 }
 
 // ============================================================
 // HELPERS
 // ============================================================
-
+const state = new Map();
+function getState(userId) {
+    if (!state.has(userId)) state.set(userId, {});
+    return state.get(userId);
+}
+function resetTempState(userId) {
+    const s = getState(userId);
+    ['waitingForName','waitingForOrderDesc','waitingForBudget','waitingForPhone',
+     'waitingForSecondPhone','waitingForReview','waitingForComplaint',
+     'waitingForAdminPassword','waitingForBroadcast','waitingForMenuTitle',
+     'waitingForMenuAction','waitingForChannelPost'].forEach(k => s[k] = false);
+}
 function now() {
-    return new Date().toLocaleString('uz-UZ', {
-        timeZone: 'Asia/Tashkent'
-    });
+    return new Date().toISOString().replace('T', ' ').slice(0, 19);
 }
+function isAdmin(ctx) { return String(ctx.from?.id) === ADMIN_ID; }
 
-function isAdmin(ctx) {
-    return String(ctx.from?.id) === String(ADMIN_ID);
-}
-
-function getUser(userId) {
-    return db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-}
-
-function ensureUser(ctx) {
-    if (!ctx.from) return null;
-
-    const user = ctx.from;
-
-    db.prepare(`
-        INSERT INTO users (
-            id,
-            first_name,
-            last_name,
-            username,
-            updated_at,
-            last_seen
-        )
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        ON CONFLICT(id) DO UPDATE SET
-            first_name = excluded.first_name,
-            last_name = excluded.last_name,
-            username = excluded.username,
-            updated_at = CURRENT_TIMESTAMP,
-            last_seen = CURRENT_TIMESTAMP
-    `).run(
-        user.id,
-        user.first_name || '',
-        user.last_name || '',
-        user.username || ''
-    );
-
-    return getUser(user.id);
-}
-
-function setState(userId, state) {
-    db.prepare(`
-        UPDATE users
-        SET state = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-    `).run(state, userId);
-}
-
-function updateUser(userId, data) {
-    const allowed = [
-        'first_name',
-        'last_name',
-        'username',
-        'phone',
-        'phone2',
-        'language',
-        'subscribed',
-        'instagram_confirmed',
-        'onboarding_completed',
-        'blocked',
-        'block_reason',
-        'has_played',
-        'has_discount',
-        'promo_code',
-        'state',
-        'pending_service',
-        'client_full_name',
-        'order_description',
-        'detected_service',
-        'min_price',
-        'client_budget'
-    ];
-
-    const keys = Object.keys(data).filter(k => allowed.includes(k));
-
-    if (!keys.length) return;
-
-    const sets = keys.map(k => `${k} = @${k}`).join(', ');
-
-    db.prepare(`
-        UPDATE users
-        SET ${sets},
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = @id
-    `).run({
-        ...data,
-        id: userId
-    });
-}
-
-function normalizePhone(phone) {
-    if (!phone) return '';
-    return String(phone).replace(/[^\d+]/g, '').replace(/^\+/, '');
-}
-
-function formatPhone(phone) {
-    const n = normalizePhone(phone);
-    return n ? `+${n}` : 'Yo‘q';
-}
-
-function escapeHtml(value) {
-    return String(value ?? '')
+// HTML escape — barcha foydalanuvchi kontenti uchun
+function esc(text = '') {
+    return String(text)
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
 }
 
-function mainMenu(lang = 'uz') {
-    if (lang === 'ru') {
-        return Markup.keyboard([
-            ['💻 Портфолио проектов', '⚙️ Услуги и цены'],
-            ['🎮 Выиграть 15% скидку', '⭐️ Отзывы'],
-            ['📞 Контакты', '💻 Заказать проект'],
-            ['🌐 Изменить язык']
-        ]).resize();
+function saveUser(ctx) {
+    if (!ctx.from) return;
+    const ex = db.prepare(`SELECT id FROM users WHERE id = ?`).get(ctx.from.id);
+    if (!ex) {
+        db.prepare(`INSERT INTO users (id,first_name,last_name,username,registered_at,last_seen) VALUES (?,?,?,?,?,?)`)
+          .run(ctx.from.id, ctx.from.first_name || '', ctx.from.last_name || '', ctx.from.username || '', now(), now());
+    } else {
+        db.prepare(`UPDATE users SET first_name=?,last_name=?,username=?,last_seen=? WHERE id=?`)
+          .run(ctx.from.first_name || '', ctx.from.last_name || '', ctx.from.username || '', now(), ctx.from.id);
     }
-
-    if (lang === 'en') {
-        return Markup.keyboard([
-            ['💻 Portfolio', '⚙️ Services & Pricing'],
-            ['🎮 Win 15% Discount', '⭐️ Reviews'],
-            ['📞 Contact', '💻 Order Project'],
-            ['🌐 Change Language']
-        ]).resize();
-    }
-
-    return Markup.keyboard([
-        ['💻 Bizning ishlar', '⚙️ Xizmatlar va Narxlar'],
-        ['🎮 15% Chegirma o‘yini', '⭐️ Mijozlar fikri'],
-        ['📞 Biz bilan bog‘lanish', '💻 Buyurtma berish'],
-        ['🌐 Tilni o‘zgartirish']
-    ]).resize();
 }
+function updateUser(userId, data) {
+    const fields = Object.keys(data);
+    if (!fields.length) return;
+    const sql = `UPDATE users SET ${fields.map(f => `${f} = ?`).join(', ')} WHERE id = ?`;
+    db.prepare(sql).run(...fields.map(f => data[f]), userId);
+}
+function getUser(userId) { return db.prepare(`SELECT * FROM users WHERE id=?`).get(userId); }
 
 // ============================================================
-// ONBOARDING
+// MIDDLEWARE
 // ============================================================
-
-function onboardingKeyboard() {
-    return Markup.inlineKeyboard([
-        [
-            Markup.button.url(
-                '📢 Kanalga obuna bo‘lish',
-                CHANNEL_URL
-            )
-        ],
-        [
-            Markup.button.url(
-                '📸 Instagramga obuna bo‘lish',
-                INSTAGRAM_URL
-            )
-        ],
-        [
-            Markup.button.callback(
-                '✅ Obunani tekshirish',
-                'check_subscription'
-            )
-        ]
-    ]);
-}
-
-async function sendOnboarding(ctx) {
-    const text =
-        '🚀 <b>Bilol | Web Developer</b>\n\n' +
-        'Botdan foydalanishdan oldin quyidagi 2 ta qadamni bajaring:\n\n' +
-        '1️⃣ <b>Telegram kanalga obuna bo‘ling</b>\n' +
-        '2️⃣ <b>Instagram sahifamizga obuna bo‘ling</b>\n\n' +
-        '📢 Kanal: @webuzbekistan\n' +
-        '📸 Instagram: @webi.uz\n\n' +
-        'Obuna bo‘lganingizdan keyin quyidagi tugmani bosing 👇';
-
+bot.use(async (ctx, next) => {
     try {
-        await ctx.reply(text, {
-            parse_mode: 'HTML',
-            ...onboardingKeyboard()
-        });
-    } catch (e) {
-        console.log('Onboarding xatosi:', e.message);
-    }
-}
-
-async function checkChannelSubscription(ctx) {
-    const userId = ctx.from.id;
-
-    try {
-        const member = await ctx.telegram.getChatMember(
-            CHANNEL_USERNAME,
-            userId
-        );
-
-        const allowedStatuses = [
-            'creator',
-            'administrator',
-            'member'
-        ];
-
-        if (!allowedStatuses.includes(member.status)) {
-            updateUser(userId, {
-                subscribed: 0,
-                onboarding_completed: 0
-            });
-
-            await ctx.answerCbQuery(
-                '❌ Avval kanalga obuna bo‘ling!',
-                { show_alert: true }
-            );
-
-            return false;
+        if (ctx.from) {
+            saveUser(ctx);
+            const u = getUser(ctx.from.id);
+            if (!isAdmin(ctx) && u && u.is_blocked === 1) {
+                return ctx.reply('🚫 Sizning botdan foydalanish imkoniyatingiz vaqtincha cheklangan.').catch(() => {});
+            }
         }
+        await next();
+    } catch (e) {
+        console.error('GLOBAL ERROR:', e);
+    }
+});
 
-        updateUser(userId, {
-            subscribed: 1
-        });
-
-        return true;
-
-    } catch (error) {
-        console.log('Kanal tekshirish xatosi:', error.message);
-
-        await ctx.answerCbQuery(
-            '⚠️ Kanalni tekshirib bo‘lmadi. Bot kanalga admin qilinganini tekshiring.',
-            { show_alert: true }
-        ).catch(() => {});
-
+// ============================================================
+// SUBSCRIPTION
+// ============================================================
+async function checkChannelSub(userId) {
+    try {
+        const m = await bot.telegram.getChatMember(TARGET_CHANNEL, userId);
+        return ['creator', 'administrator', 'member'].includes(m.status);
+    } catch (e) {
+        console.log('CHANNEL CHECK:', e.description || e.message);
         return false;
     }
 }
 
-bot.action('check_subscription', async (ctx) => {
-    ensureUser(ctx);
+function subKeyboard() {
+    return Markup.inlineKeyboard([
+        [Markup.button.url('📢 Kanalga obuna bo‘lish', CHANNEL_URL)],
+        [Markup.button.url('📸 Instagramni ochish', INSTAGRAM_URL)],
+        [Markup.button.callback('🔄 Obunani tekshirish', 'check_sub')],
+        [Markup.button.callback('📸 Instagramni tekshirdim', 'insta_confirm')]
+    ]);
+}
 
-    const channelOk = await checkChannelSubscription(ctx);
+async function requireSubscription(ctx) {
+    const userId = ctx.from.id;
+    const user = getUser(userId);
+    if (user.subscribed_channel === 1 && user.instagram_confirmed === 1) return true;
 
-    if (!channelOk) return;
-
-    const user = getUser(ctx.from.id);
-
-    if (!user.instagram_confirmed) {
-        await ctx.answerCbQuery('✅ Kanal obunasi tasdiqlandi!', {
-            show_alert: false
-        }).catch(() => {});
-
-        await ctx.editMessageText(
-            '✅ <b>Telegram kanal obunasi tasdiqlandi!</b>\n\n' +
-            '📸 Endi Instagram sahifamizga obuna bo‘ling:\n' +
-            `<a href="${INSTAGRAM_URL}">@webi.uz</a>\n\n` +
-            'Obuna bo‘lganingizdan keyin quyidagi tugmani bosing 👇',
-            {
-                parse_mode: 'HTML',
-                ...Markup.inlineKeyboard([
-                    [
-                        Markup.button.url(
-                            '📸 Instagramga kirish',
-                            INSTAGRAM_URL
-                        )
-                    ],
-                    [
-                        Markup.button.callback(
-                            '✅ Instagramga obuna bo‘ldim',
-                            'instagram_confirm'
-                        )
-                    ]
-                ]
-            }
+    const ok = await checkChannelSub(userId);
+    if (!ok) {
+        await ctx.reply(
+            '🚀 <b>BILOL | WEB DEVELOPER</b>\n\n' +
+            'Botdan foydalanish uchun avval kanalimizga obuna bo‘ling:\n\n' +
+            '📢 Kanal: @webuzbekistan\n' +
+            '📸 Instagram: @webi.uz\n\n' +
+            'Obuna bo‘lgach, <b>Obunani tekshirish</b> tugmasini bosing 👇',
+            { parse_mode: 'HTML', ...subKeyboard() }
         ).catch(() => {});
-
-        return;
+        return false;
     }
+    updateUser(userId, { subscribed_channel: 1 });
 
-    await requestPhone(ctx);
-});
-
-bot.action('instagram_confirm', async (ctx) => {
-    ensureUser(ctx);
-
-    const user = getUser(ctx.from.id);
-
-    if (!user.subscribed) {
-        await ctx.answerCbQuery(
-            '❌ Avval Telegram kanalga obuna bo‘ling.',
-            { show_alert: true }
-        );
-        return;
+    if (user.instagram_confirmed !== 1) {
+        await ctx.reply(
+            '✅ Kanal obunasi tasdiqlandi!\n\n' +
+            '📸 Endi Instagramni ham ochib ko‘ring va <b>Instagramni tekshirdim</b> tugmasini bosing 👇',
+            { parse_mode: 'HTML', ...subKeyboard() }
+        ).catch(() => {});
+        return false;
     }
+    return true;
+}
 
-    updateUser(ctx.from.id, {
-        instagram_confirmed: 1
-    });
-
-    await ctx.answerCbQuery(
-        '✅ Instagram tasdiqlandi!',
-        { show_alert: false }
-    );
-
-    await requestPhone(ctx);
-});
+// ============================================================
+// PHONE REGISTRATION
+// ============================================================
+function phoneKeyboard() {
+    return Markup.keyboard([
+        [Markup.button.contactRequest('📱 Telefon raqamimni yuborish')]
+    ]).resize().oneTime();
+}
 
 async function requestPhone(ctx) {
     const userId = ctx.from.id;
+    const u = getUser(userId);
+    if (!u.phone_verified) {
+        getState(userId).waitingForPhone = true;
+        return ctx.reply(
+            '📱 <b>Oxirgi qadam</b>\n\n' +
+            'Botdan to‘liq foydalanish uchun telefon raqamingizni pastdagi tugma orqali yuboring.\n\n' +
+            '⚠️ Raqamni qo‘lda yozish qabul qilinmaydi.',
+            { parse_mode: 'HTML', ...phoneKeyboard() }
+        );
+    }
+}
 
-    updateUser(userId, {
-        state: 'waiting_phone'
-    });
+async function ensureAccess(ctx) {
+    const sub = await requireSubscription(ctx);
+    if (!sub) return false;
+    const u = getUser(ctx.from.id);
+    if (!u.phone_verified) { await requestPhone(ctx); return false; }
+    return true;
+}
 
+// ============================================================
+// LANGUAGE
+// ============================================================
+function languageKeyboard() {
+    return Markup.inlineKeyboard([[
+        Markup.button.callback('🇺🇿 O‘zbekcha', 'lang_uz'),
+        Markup.button.callback('🇷🇺 Русский', 'lang_ru'),
+        Markup.button.callback('🇬🇧 English', 'lang_en')
+    ]]);
+}
+
+function getMainMenu(lang = 'uz') {
+    const rows = db.prepare(`SELECT * FROM menu_items WHERE active=1 ORDER BY sort_order ASC`).all();
+    const titles = rows.map(i => lang === 'ru' ? i.title_ru : lang === 'en' ? i.title_en : i.title_uz);
+    const kb = [];
+    for (let i = 0; i < titles.length; i += 2) kb.push(titles.slice(i, i + 2));
+    return Markup.keyboard(kb).resize();
+}
+
+async function showMainMenu(ctx) {
+    const user = getUser(ctx.from.id);
+    const lang = user?.language || 'uz';
     await ctx.reply(
-        '🎉 <b>Ajoyib! Barcha obunalar tasdiqlandi.</b>\n\n' +
-        '📞 Endi botdan foydalanish uchun telefon raqamingizni yuboring.\n\n' +
-        '⚠️ Raqamni yozib kiritmang — faqat pastdagi ' +
-        '<b>Telefon raqamimni yuborish</b> tugmasidan foydalaning.',
-        {
-            parse_mode: 'HTML',
-            ...Markup.keyboard([
-                [
-                    Markup.button.contactRequest(
-                        '📱 Telefon raqamimni yuborish'
-                    )
-                ]
-            ]).resize()
-        }
+        '🚀 <b>BILOL | WEB DEVELOPER</b>\n\n' +
+        'Biznesingiz uchun zamonaviy raqamli mahsulotlar yaratamiz.\n\n' +
+        '💻 Web-saytlar — biznes, landing, korporativ\n' +
+        '🛒 Online do‘konlar — E-commerce tizimlari\n' +
+        '🤖 Telegram botlar — avtomatlashtirish\n' +
+        '🧠 AI yechimlar — aqlli tizimlar\n' +
+        '📱 Web ilovalar — maxsus platformalar\n' +
+        '🎨 Logo & dizayn — brend yechimlar\n' +
+        '✨ Animatsiya — motion dizayn\n\n' +
+        '👇 Kerakli bo‘limni tanlang:',
+        { parse_mode: 'HTML', ...getMainMenu(lang) }
     );
 }
 
 // ============================================================
 // START
 // ============================================================
+bot.start(async ctx => {
+    const userId = ctx.from.id;
+    resetTempState(userId);
+    updateUser(userId, { language: 'uz' });
 
-bot.start(async (ctx) => {
-    const user = ensureUser(ctx);
-
-    // Admin har doim admin panelga kira oladi
     if (isAdmin(ctx)) {
-        await ctx.reply(
-            '👑 <b>Assalomu alaykum, Boss!</b>\n\n' +
-            'Admin panel: /admin',
-            { parse_mode: 'HTML' }
-        );
-        return;
+        await ctx.reply('👑 <b>Xush kelibsiz, Boss!</b>\n\nAdmin panel: /admin', { parse_mode: 'HTML' });
     }
 
-    if (
-        user &&
-        user.onboarding_completed === 1 &&
-        user.blocked === 0
-    ) {
-        await ctx.reply(
-            '👋 <b>Xush kelibsiz!</b>\n\n' +
-            'Bilol | Web Developer botidan foydalanishingiz mumkin. 👇',
-            {
-                parse_mode: 'HTML',
-                ...mainMenu(user.language || 'uz')
-            }
-        );
-        return;
-    }
+    const sub = await requireSubscription(ctx);
+    if (!sub) return;
 
-    await sendOnboarding(ctx);
+    const u = getUser(userId);
+    if (!u.phone_verified) { await requestPhone(ctx); return; }
+
+    await showMainMenu(ctx);
 });
 
 // ============================================================
-// GLOBAL USER CHECK
+// SUBSCRIPTION ACTIONS
 // ============================================================
-
-bot.use(async (ctx, next) => {
-    if (!ctx.from) return next();
-
-    ensureUser(ctx);
-
-    // Admin uchun blok yo‘q
-    if (isAdmin(ctx)) {
-        return next();
+bot.action('check_sub', async ctx => {
+    await ctx.answerCbQuery().catch(() => {});
+    const ok = await checkChannelSub(ctx.from.id);
+    if (!ok) {
+        return ctx.reply(
+            '❌ Hali kanalga obuna bo‘lmagansiz.\n\n📢 Avval @webuzbekistan kanaliga obuna bo‘ling.',
+            subKeyboard()
+        );
     }
+    updateUser(ctx.from.id, { subscribed_channel: 1 });
+    await ctx.reply(
+        '✅ Kanal obunasi tasdiqlandi!\n\n📸 Endi Instagramni ochib, <b>Instagramni tekshirdim</b> tugmasini bosing 👇',
+        { parse_mode: 'HTML', ...subKeyboard() }
+    );
+});
 
-    const user = getUser(ctx.from.id);
-
-    if (user?.blocked === 1) {
-        await ctx.reply(
-            '🚫 <b>Siz botdan bloklangansiz.</b>\n\n' +
-            'Admin bilan bog‘laning:\n' +
-            '👉 @sharipoov1',
-            { parse_mode: 'HTML' }
-        ).catch(() => {});
-
-        return;
-    }
-
-    // Onboarding callback'lari ishlashi kerak
-    if (
-        ctx.callbackQuery &&
-        [
-            'check_subscription',
-            'instagram_confirm'
-        ].includes(ctx.callbackQuery.data)
-    ) {
-        return next();
-    }
-
-    // /start ishlashi kerak
-    if (ctx.message?.text?.startsWith('/start')) {
-        return next();
-    }
-
-    // Hali onboarding tugamagan bo‘lsa
-    if (user?.onboarding_completed !== 1) {
-        await sendOnboarding(ctx);
-        return;
-    }
-
-    return next();
+bot.action('insta_confirm', async ctx => {
+    await ctx.answerCbQuery().catch(() => {});
+    const ok = await checkChannelSub(ctx.from.id);
+    if (!ok) return ctx.reply('❌ Avval Telegram kanaliga obuna bo‘ling.', subKeyboard());
+    updateUser(ctx.from.id, { subscribed_channel: 1, instagram_confirmed: 1 });
+    await requestPhone(ctx);
 });
 
 // ============================================================
-// CONTACT — ONBOARDING + ORDER PHONE
+// CONTACT
 // ============================================================
-
-bot.on('contact', async (ctx) => {
+bot.on('contact', async ctx => {
     const contact = ctx.message.contact;
-    const user = ensureUser(ctx);
+    if (!contact?.phone_number) return ctx.reply('❌ Telefon raqami aniqlanmadi.');
+
+    if (contact.user_id && Number(contact.user_id) !== Number(ctx.from.id)) {
+        return ctx.reply('❌ Iltimos, faqat o‘zingizning raqamingizni yuboring.');
+    }
+
     const userId = ctx.from.id;
+    const s = getState(userId);
+    const phone = contact.phone_number.startsWith('+') ? contact.phone_number : '+' + contact.phone_number;
 
-    if (!contact) return;
-
-    // Faqat o‘z raqamini yuborishi mumkin
-    if (
-        contact.user_id &&
-        Number(contact.user_id) !== Number(userId)
-    ) {
-        await ctx.reply(
-            '❌ Faqat o‘zingizning Telegram raqamingizni yuboring.'
-        );
-        return;
+    // Order phone
+    if (s.waitingForOrderPhone) {
+        s.waitingForOrderPhone = false;
+        s.orderPhone = phone;
+        return finishOrder(ctx);
     }
 
-    const phone = normalizePhone(contact.phone_number);
+    // Registration phone
+    if (s.waitingForPhone) {
+        updateUser(userId, { phone, phone_verified: 1 });
+        s.waitingForPhone = false;
+        const u = getUser(userId);
 
-    // ========================================================
-    // ONBOARDING PHONE
-    // ========================================================
-
-    if (user.state === 'waiting_phone') {
-
-        updateUser(userId, {
-            phone,
-            onboarding_completed: 1,
-            state: ''
-        });
-
-        const fresh = getUser(userId);
-
-        const adminMessage =
-            '🚨 <b>YANGI FOYDALANUVCHI KIRDI!</b>\n\n' +
-            '👤 <b>Ism:</b> ' +
-            escapeHtml(
-                `${fresh.first_name || ''} ${fresh.last_name || ''}`.trim()
-            ) +
-            '\n' +
-            '🔗 <b>Username:</b> ' +
-            (fresh.username
-                ? `@${escapeHtml(fresh.username)}`
-                : 'Mavjud emas') +
-            '\n' +
-            '🆔 <b>Telegram ID:</b> ' +
-            userId +
-            '\n' +
-            '📞 <b>Telefon:</b> ' +
-            escapeHtml(formatPhone(phone)) +
-            '\n' +
-            '📢 <b>Kanal:</b> ✅' +
-            '\n' +
-            '📸 <b>Instagram:</b> ✅' +
-            '\n' +
-            '🕐 <b>Vaqt:</b> ' +
-            escapeHtml(now());
-
-        await ctx.telegram.sendMessage(
-            ADMIN_ID,
-            adminMessage,
-            { parse_mode: 'HTML' }
-        ).catch(err => {
-            console.log('Admin notification error:', err.message);
-        });
-
-        // Agar username yo‘q bo‘lsa, ikkinchi telefon
-        if (!ctx.from.username) {
-
-            updateUser(userId, {
-                state: 'waiting_second_phone'
-            });
-
-            await ctx.reply(
-                '✅ Birinchi raqam qabul qilindi.\n\n' +
-                '⚠️ Telegram usernameingiz mavjud emas.\n\n' +
-                '📞 Iltimos, qo‘shimcha aloqa uchun yana bitta telefon raqamingizni yuboring.',
-                {
-                    parse_mode: 'HTML',
-                    ...Markup.keyboard([
-                        [
-                            Markup.button.contactRequest(
-                                '📱 Ikkinchi telefon raqam'
-                            )
-                        ]
-                    ]).resize()
-                }
-            );
-
-            return;
-        }
-
-        await ctx.reply(
-            '🎉 <b>Ro‘yxatdan o‘tish yakunlandi!</b>\n\n' +
-            'Endi botning barcha imkoniyatlaridan foydalanishingiz mumkin. 👇',
-            {
-                parse_mode: 'HTML',
-                ...mainMenu(fresh.language || 'uz')
-            }
-        );
-
-        return;
-    }
-
-    // ========================================================
-    // SECOND PHONE
-    // ========================================================
-
-    if (user.state === 'waiting_second_phone') {
-
-        updateUser(userId, {
-            phone2: phone,
-            state: ''
-        });
-
-        const fresh = getUser(userId);
-
-        await ctx.telegram.sendMessage(
-            ADMIN_ID,
-            '📞 <b>Qo‘shimcha telefon raqami olindi!</b>\n\n' +
-            '👤 Ism: ' +
-            escapeHtml(
-                `${fresh.first_name || ''} ${fresh.last_name || ''}`.trim()
-            ) +
-            '\n' +
-            '🆔 Telegram ID: ' +
-            userId +
-            '\n' +
-            '📞 1-raqam: ' +
-            escapeHtml(formatPhone(fresh.phone)) +
-            '\n' +
-            '📞 2-raqam: ' +
-            escapeHtml(formatPhone(phone)),
+        // Admin notification
+        bot.telegram.sendMessage(ADMIN_ID,
+            '🆕 <b>YANGI FOYDALANUVCHI</b>\n\n' +
+            `👤 ${esc(ctx.from.first_name)} ${esc(ctx.from.last_name || '')}\n` +
+            `🔗 @${esc(ctx.from.username || 'yo‘q')}\n` +
+            `🆔 <code>${userId}</code>\n` +
+            `📞 ${esc(phone)}`,
             { parse_mode: 'HTML' }
         ).catch(() => {});
 
-        await ctx.reply(
-            '✅ Ikkinchi raqam ham qabul qilindi.\n\n' +
-            'Endi botdan foydalanishingiz mumkin. 👇',
-            mainMenu(fresh.language || 'uz')
-        );
-
-        return;
-    }
-
-    // ========================================================
-    // ORDER PHONE
-    // ========================================================
-
-    if (user.state === 'waiting_order_phone') {
-
-        const fresh = getUser(userId);
-
-        const discount = fresh.has_discount
-            ? '15% chegirma — BOR'
-            : 'Chegirma yo‘q';
-
-        const orderId = db.prepare(`
-            INSERT INTO orders (
-                user_id,
-                service,
-                full_name,
-                description,
-                budget,
-                phone,
-                phone2,
-                discount,
-                status
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new')
-        `).run(
-            userId,
-            fresh.pending_service || 'Umumiy murojaat',
-            fresh.client_full_name || fresh.first_name || '',
-            fresh.order_description || '',
-            fresh.client_budget || '',
-            phone,
-            fresh.phone2 || '',
-            discount
-        ).lastInsertRowid;
-
-        updateUser(userId, {
-            phone,
-            state: ''
-        });
-
-        const adminMessage =
-            '🚨 <b>BILOL | WEB DEVELOPER — YANGI BUYURTMA!</b>\n\n' +
-            '🆔 <b>Buyurtma ID:</b> #' + orderId + '\n\n' +
-
-            '👤 <b>F.I.O:</b> ' +
-            escapeHtml(
-                fresh.client_full_name ||
-                `${fresh.first_name || ''} ${fresh.last_name || ''}`.trim()
-            ) +
-            '\n' +
-
-            '📞 <b>Tel:</b> ' +
-            escapeHtml(formatPhone(phone)) +
-            '\n' +
-
-            '📞 <b>Qo‘shimcha tel:</b> ' +
-            escapeHtml(formatPhone(fresh.phone2)) +
-            '\n' +
-
-            '🔗 <b>Username:</b> ' +
-            (fresh.username
-                ? `@${escapeHtml(fresh.username)}`
-                : 'Mavjud emas') +
-            '\n' +
-
-            '🆔 <b>Telegram ID:</b> ' +
-            userId +
-            '\n\n' +
-
-            '📌 <b>Xizmat:</b> ' +
-            escapeHtml(fresh.detected_service || fresh.pending_service || 'Umumiy murojaat') +
-            '\n' +
-
-            '📝 <b>Loyiha:</b> ' +
-            escapeHtml(fresh.order_description || 'Ko‘rsatilmagan') +
-            '\n' +
-
-            '💰 <b>Budjet:</b> ' +
-            escapeHtml(fresh.client_budget || 'Kelishiladi') +
-            '\n' +
-
-            '🏷 <b>Aksiya:</b> ' +
-            escapeHtml(discount) +
-            '\n' +
-
-            '💳 <b>To‘lov:</b> 50% oldindan to‘lovga rozilik berilgan\n' +
-
-            '🕐 <b>Vaqt:</b> ' +
-            escapeHtml(now());
-
-        await ctx.telegram.sendMessage(
-            ADMIN_ID,
-            adminMessage,
-            { parse_mode: 'HTML' }
-        ).catch(err => {
-            console.log('Order admin error:', err.message);
-        });
-
-        // Chegirma ishlatilgan bo‘lsa, buyurtmadan keyin yopamiz
-        if (fresh.has_discount) {
-            updateUser(userId, {
-                has_discount: 0,
-                promo_code: ''
-            });
-        }
-
-        await ctx.reply(
-            '✅ <b>Buyurtmangiz qabul qilindi!</b>\n\n' +
-            'Ma’lumotlaringiz adminga yuborildi.\n' +
-            'Tez orada siz bilan bog‘lanamiz. 🚀',
-            {
-                parse_mode: 'HTML',
-                ...mainMenu(fresh.language || 'uz')
-            }
-        );
-
-        // Order holatini tozalash
-        updateUser(userId, {
-            pending_service: '',
-            client_full_name: '',
-            order_description: '',
-            detected_service: '',
-            min_price: 0,
-            client_budget: ''
-        });
-
-        return;
-    }
-
-    await ctx.reply(
-        '📱 Raqamingiz qabul qilindi.'
-    );
-});
-
-// ============================================================
-// ADMIN COMMAND
-// ============================================================
-
-bot.command('admin', async (ctx) => {
-
-    if (!isAdmin(ctx)) {
-        return;
-    }
-
-    ensureUser(ctx);
-
-    updateUser(ctx.from.id, {
-        state: 'waiting_admin_password'
-    });
-
-    await ctx.reply(
-        '🔐 <b>ADMIN PANEL</b>\n\n' +
-        'Maxfiy parolni kiriting:',
-        { parse_mode: 'HTML' }
-    );
-});
-
-// ============================================================
-// ADMIN PANEL KEYBOARD
-// ============================================================
-
-function adminMenuKeyboard() {
-    return Markup.inlineKeyboard([
-        [
-            Markup.button.callback(
-                '📊 Statistika',
-                'adm_stats'
-            )
-        ],
-        [
-            Markup.button.callback(
-                '👥 Foydalanuvchilar',
-                'adm_users'
-            )
-        ],
-        [
-            Markup.button.callback(
-                '📢 Reklama tarqatish',
-                'adm_broadcast'
-            )
-        ],
-        [
-            Markup.button.callback(
-                '🚫 Block / Unblock',
-                'adm_block_menu'
-            )
-        ],
-        [
-            Markup.button.callback(
-                '📝 Bot ma’lumotlari',
-                'adm_data'
-            )
-        ]
-    ]);
-}
-
-async function showAdminPanel(ctx) {
-
-    await ctx.reply(
-        '🛡 <b>BILOL | WEB DEVELOPER</b>\n' +
-        'ADMIN CONTROL CENTER\n\n' +
-
-        '┏ Xavfsizlik: <code>Protected</code>\n' +
-        '┣ Tizim: <code>Online ⚡</code>\n' +
-        '┣ Database: <code>SQLite</code>\n' +
-        '┗ Boshqaruv menyusi 👇',
-        {
-            parse_mode: 'HTML',
-            ...adminMenuKeyboard()
-        }
-    );
-}
-
-// ============================================================
-// ADMIN TEXT HANDLER
-// ============================================================
-
-bot.on('text', async (ctx, next) => {
-
-    const userId = ctx.from.id;
-    const text = ctx.message.text.trim();
-
-    ensureUser(ctx);
-
-    if (!isAdmin(ctx)) {
-        return next();
-    }
-
-    const user = getUser(userId);
-
-    // ADMIN PASSWORD
-    if (user.state === 'waiting_admin_password') {
-
-        if (text !== ADMIN_PASSWORD) {
-            await ctx.reply(
-                '❌ <b>Noto‘g‘ri parol.</b>\n\nQaytadan kiriting.',
-                { parse_mode: 'HTML' }
+        if (!u.username) {
+            s.waitingForSecondPhone = true;
+            return ctx.reply(
+                '📞 Telefon raqamingiz qabul qilindi.\n\n' +
+                '👤 Telegram username‘ingiz mavjud emas.\n\n' +
+                '📱 Iltimos, aloqa uchun <b>qo‘shimcha telefon raqamini</b> ham yuboring.',
+                { parse_mode: 'HTML', ...phoneKeyboard() }
             );
-            return;
         }
-
-        updateUser(userId, {
-            state: ''
-        });
-
-        await showAdminPanel(ctx);
-        return;
+        return ctx.reply(
+            '✅ <b>Ro‘yxatdan o‘tish yakunlandi!</b>\n\n🚀 Endi botning barcha bo‘limlaridan foydalanishingiz mumkin.',
+            { parse_mode: 'HTML', ...getMainMenu(u.language || 'uz') }
+        );
     }
 
-    // BROADCAST
-    if (user.state === 'waiting_broadcast') {
-
-        updateUser(userId, {
-            state: ''
-        });
-
-        const users = db.prepare(`
-            SELECT id
-            FROM users
-            WHERE blocked = 0
-        `).all();
-
-        let success = 0;
-        let failed = 0;
-
-        await ctx.reply(
-            '⏳ <b>Reklama tarqatilmoqda...</b>\n\n' +
-            `👥 Jami: ${users.length} ta`,
-            { parse_mode: 'HTML' }
+    // Second phone
+    if (s.waitingForSecondPhone) {
+        updateUser(userId, { second_phone: phone });
+        s.waitingForSecondPhone = false;
+        const u = getUser(userId);
+        return ctx.reply(
+            '✅ Qo‘shimcha telefon raqami qabul qilindi.\n\n🚀 Endi barcha xizmatlardan foydalanishingiz mumkin.',
+            getMainMenu(u.language || 'uz')
         );
-
-        for (const item of users) {
-            try {
-                await ctx.telegram.copyMessage(
-                    item.id,
-                    ctx.chat.id,
-                    ctx.message.message_id
-                );
-
-                success++;
-
-            } catch (e) {
-
-                failed++;
-
-                // Botni bloklagan bo‘lsa avtomatik blocked
-                if (
-                    String(e.message).includes('bot was blocked') ||
-                    String(e.message).includes('chat not found') ||
-                    String(e.message).includes('user is deactivated')
-                ) {
-                    db.prepare(`
-                        UPDATE users
-                        SET blocked = 1,
-                            block_reason = 'Telegram blocked/deactivated'
-                        WHERE id = ?
-                    `).run(item.id);
-                }
-            }
-        }
-
-        await ctx.reply(
-            '✅ <b>REKLAMA YAKUNLANDI</b>\n\n' +
-            `📤 Yuborildi: <b>${success}</b>\n` +
-            `🚫 Yetib bormadi: <b>${failed}</b>\n\n` +
-            'Reklama botdan foydalanayotgan bloklanmagan foydalanuvchilarga yuborildi.',
-            { parse_mode: 'HTML' }
-        );
-
-        return;
     }
 
-    // BOT DATA EDITOR
-    if (user.state.startsWith('data_')) {
-
-        const key = user.state.replace('data_', '');
-
-        setBotData(key, text);
-
-        updateUser(userId, {
-            state: ''
-        });
-
-        await ctx.reply(
-            `✅ <b>${escapeHtml(key)}</b> ma’lumoti yangilandi.\n\n` +
-            `Yangi qiymat:\n<code>${escapeHtml(text)}</code>`,
-            {
-                parse_mode: 'HTML',
-                ...Markup.inlineKeyboard([
-                    [
-                        Markup.button.callback(
-                            '🔙 Bot ma’lumotlariga qaytish',
-                            'adm_data'
-                        )
-                    ]
-                ])
-            }
-        );
-
-        return;
-    }
-
-    return next();
+    return ctx.reply('📱 Raqamingiz qabul qilindi.');
 });
 
 // ============================================================
-// ADMIN STATS
+// LANGUAGE ACTIONS
 // ============================================================
-
-bot.action('adm_stats', async (ctx) => {
-
-    if (!isAdmin(ctx)) return;
-
+bot.action('lang_uz', async ctx => {
     await ctx.answerCbQuery().catch(() => {});
-
-    const total = db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM users
-    `).get().count;
-
-    const active = db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM users
-        WHERE blocked = 0
-    `).get().count;
-
-    const blocked = db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM users
-        WHERE blocked = 1
-    `).get().count;
-
-    const orders = db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM orders
-    `).get().count;
-
-    const newOrders = db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM orders
-        WHERE status = 'new'
-    `).get().count;
-
-    const processing = db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM orders
-        WHERE status = 'processing'
-    `).get().count;
-
-    const approved = db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM orders
-        WHERE status = 'approved'
-    `).get().count;
-
-    const cancelled = db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM orders
-        WHERE status = 'cancelled'
-    `).get().count;
-
-    const complaints = db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM complaints
-    `).get().count;
-
-    const newComplaints = db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM complaints
-        WHERE status = 'new'
-    `).get().count;
-
-    const reviews = db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM reviews
-    `).get().count;
-
-    const uptimeSec = Math.floor(
-        (Date.now() - START_TIME) / 1000
-    );
-
-    const hours = Math.floor(uptimeSec / 3600);
-    const minutes = Math.floor((uptimeSec % 3600) / 60);
-
-    const text =
-        '📊 <b>BILOL | WEB DEVELOPER — STATISTIKA</b>\n\n' +
-
-        '━━━━━━━━━━━━━━━━━━━━━━\n' +
-        '👥 <b>FOYDALANUVCHILAR</b>\n\n' +
-        `👥 Jami: <b>${total}</b>\n` +
-        `🟢 Aktiv: <b>${active}</b>\n` +
-        `🚫 Bloklangan: <b>${blocked}</b>\n\n` +
-
-        '━━━━━━━━━━━━━━━━━━━━━━\n' +
-        '📦 <b>ZAKAZLAR</b>\n\n' +
-        `📦 Jami: <b>${orders}</b>\n` +
-        `🆕 Yangi: <b>${newOrders}</b>\n` +
-        `🔄 Jarayonda: <b>${processing}</b>\n` +
-        `✅ Tasdiqlangan: <b>${approved}</b>\n` +
-        `❌ Bekor qilingan: <b>${cancelled}</b>\n\n` +
-
-        '━━━━━━━━━━━━━━━━━━━━━━\n' +
-        '📝 <b>SHIKOYATLAR</b>\n\n' +
-        `📝 Jami: <b>${complaints}</b>\n` +
-        `🚨 Yangi: <b>${newComplaints}</b>\n\n` +
-
-        '━━━━━━━━━━━━━━━━━━━━━━\n' +
-        '⭐ <b>FIKRLAR</b>\n\n' +
-        `⭐ Jami baholar: <b>${reviews}</b>\n\n` +
-
-        '━━━━━━━━━━━━━━━━━━━━━━\n' +
-        '⚙️ <b>TIZIM</b>\n\n' +
-        `⏱ Uptime: <b>${hours} soat ${minutes} daqiqa</b>\n` +
-        '🤖 Bot: <b>Online ⚡</b>\n' +
-        '💾 Database: <b>SQLite</b>\n' +
-        '🟢 Status: <b>Stable</b>';
-
-    await ctx.editMessageText(
-        text,
-        {
-            parse_mode: 'HTML',
-            ...Markup.inlineKeyboard([
-                [
-                    Markup.button.callback(
-                        '🔄 Yangilash',
-                        'adm_stats'
-                    )
-                ],
-                [
-                    Markup.button.callback(
-                        '🔙 Orqaga',
-                        'adm_back'
-                    )
-                ]
-            ])
-        }
-    ).catch(async () => {
-        await ctx.reply(
-            text,
-            {
-                parse_mode: 'HTML',
-                ...Markup.inlineKeyboard([
-                    [
-                        Markup.button.callback(
-                            '🔙 Orqaga',
-                            'adm_back'
-                        )
-                    ]
-                ])
-            }
-        );
-    });
+    updateUser(ctx.from.id, { language: 'uz' });
+    await ctx.reply('🇺🇿 O‘zbek tili tanlandi.', getMainMenu('uz'));
 });
-
-// ============================================================
-// ADMIN BACK
-// ============================================================
-
-bot.action('adm_back', async (ctx) => {
-
-    if (!isAdmin(ctx)) return;
-
+bot.action('lang_ru', async ctx => {
     await ctx.answerCbQuery().catch(() => {});
-
-    await ctx.editMessageText(
-        '🛡 <b>BILOL | WEB DEVELOPER</b>\n' +
-        'ADMIN CONTROL CENTER\n\n' +
-        '┏ Xavfsizlik: <code>Protected</code>\n' +
-        '┣ Tizim: <code>Online ⚡</code>\n' +
-        '┣ Database: <code>SQLite</code>\n' +
-        '┗ Boshqaruv menyusi 👇',
-        {
-            parse_mode: 'HTML',
-            ...adminMenuKeyboard()
-        }
-    ).catch(() => {
-        ctx.reply(
-            '🛡 <b>ADMIN CONTROL CENTER</b>',
-            {
-                parse_mode: 'HTML',
-                ...adminMenuKeyboard()
-            }
-        );
-    });
+    updateUser(ctx.from.id, { language: 'ru' });
+    await ctx.reply('🇷🇺 Русский язык выбран.', getMainMenu('ru'));
 });
-
-// ============================================================
-// ADMIN BROADCAST
-// ============================================================
-
-bot.action('adm_broadcast', async (ctx) => {
-
-    if (!isAdmin(ctx)) return;
-
+bot.action('lang_en', async ctx => {
     await ctx.answerCbQuery().catch(() => {});
-
-    updateUser(ctx.from.id, {
-        state: 'waiting_broadcast'
-    });
-
-    await ctx.reply(
-        '📢 <b>UNIVERSAL REKLAMA</b>\n\n' +
-        'Endi yuborgan xabaringiz botdan foydalanayotgan barcha ' +
-        '<b>bloklanmagan</b> foydalanuvchilarga yuboriladi.\n\n' +
-
-        '📝 Oddiy matn\n' +
-        '🖼 Rasm\n' +
-        '📹 Video\n' +
-        '📄 Fayl\n' +
-        '🎵 Audio\n\n' +
-
-        'Xabarni yuboring 👇',
-        {
-            parse_mode: 'HTML',
-            ...Markup.inlineKeyboard([
-                [
-                    Markup.button.callback(
-                        '❌ Bekor qilish',
-                        'adm_cancel'
-                    )
-                ]
-            ])
-        }
-    );
+    updateUser(ctx.from.id, { language: 'en' });
+    await ctx.reply('🇬🇧 English selected.', getMainMenu('en'));
 });
 
-bot.action('adm_cancel', async (ctx) => {
-
-    if (!isAdmin(ctx)) return;
-
-    updateUser(ctx.from.id, {
-        state: ''
-    });
-
-    await ctx.answerCbQuery('Bekor qilindi');
-
-    await ctx.reply(
-        '❌ Amal bekor qilindi.',
-        adminMenuKeyboard()
-    );
+bot.hears(['🌐 Tilni o‘zgartirish', '🌐 Изменить язык', '🌐 Change Language'], async ctx => {
+    if (!(await ensureAccess(ctx))) return;
+    await ctx.reply('🌐 <b>Tilni tanlang:</b>', { parse_mode: 'HTML', ...languageKeyboard() });
 });
-
-// ============================================================
-// ADMIN USERS
-// ============================================================
-
-bot.action('adm_users', async (ctx) => {
-
-    if (!isAdmin(ctx)) return;
-
-    await ctx.answerCbQuery().catch(() => {});
-
-    const users = db.prepare(`
-        SELECT *
-        FROM users
-        ORDER BY last_seen DESC
-        LIMIT 50
-    `).all();
-
-    if (!users.length) {
-        await ctx.reply('👥 Hozircha foydalanuvchilar yo‘q.');
-        return;
-    }
-
-    const buttons = [];
-
-    for (const user of users) {
-
-        const name =
-            `${user.first_name || ''} ${user.last_name || ''}`.trim() ||
-            'Noma’lum';
-
-        const status =
-            user.blocked
-                ? '🚫'
-                : '🟢';
-
-        buttons.push([
-            Markup.button.callback(
-                `${status} ${name.slice(0, 25)}`,
-                `user_${user.id}`
-            )
-        ]);
-    }
-
-    buttons.push([
-        Markup.button.callback(
-            '🔙 Orqaga',
-            'adm_back'
-        )
-    ]);
-
-    await ctx.reply(
-        `👥 <b>FOYDALANUVCHILAR</b>\n\n` +
-        `Jami: <b>${db.prepare('SELECT COUNT(*) AS count FROM users').get().count}</b>\n\n` +
-        `Har bir foydalanuvchini alohida ko‘rish uchun tanlang 👇`,
-        {
-            parse_mode: 'HTML',
-            ...Markup.inlineKeyboard(buttons)
-        }
-    );
-});
-
-// ============================================================
-// USER CARD
-// ============================================================
-
-bot.action(/^user_(\d+)$/, async (ctx) => {
-
-    if (!isAdmin(ctx)) return;
-
-    await ctx.answerCbQuery().catch(() => {});
-
-    const id = Number(ctx.match[1]);
-    const user = getUser(id);
-
-    if (!user) {
-        await ctx.reply('❌ Foydalanuvchi topilmadi.');
-        return;
-    }
-
-    const name =
-        `${user.first_name || ''} ${user.last_name || ''}`.trim() ||
-        'Noma’lum';
-
-    const status = user.blocked
-        ? '🚫 BLOKLANGAN'
-        : '🟢 FAOL';
-
-    const text =
-        '👤 <b>FOYDALANUVCHI</b>\n\n' +
-        '━━━━━━━━━━━━━━━━━━━━━━\n\n' +
-
-        `👤 <b>Ism:</b> ${escapeHtml(name)}\n` +
-
-        `🔗 <b>Username:</b> ${
-            user.username
-                ? '@' + escapeHtml(user.username)
-                : 'Yo‘q'
-        }\n` +
-
-        `🆔 <b>Telegram ID:</b> <code>${user.id}</code>\n` +
-
-        `📞 <b>Telefon:</b> ${escapeHtml(formatPhone(user.phone))}\n` +
-
-        `📞 <b>2-telefon:</b> ${escapeHtml(formatPhone(user.phone2))}\n` +
-
-        `📢 <b>Kanal:</b> ${
-            user.subscribed ? '✅' : '❌'
-        }\n` +
-
-        `📸 <b>Instagram:</b> ${
-            user.instagram_confirmed ? '✅' : '❌'
-        }\n` +
-
-        `🕐 <b>Ro‘yxatdan o‘tgan:</b> ${escapeHtml(user.created_at)}\n` +
-
-        `🕐 <b>Oxirgi faollik:</b> ${escapeHtml(user.last_seen)}\n` +
-
-        `📊 <b>Status:</b> ${status}`;
-
-    const buttons = [];
-
-    if (user.blocked) {
-        buttons.push([
-            Markup.button.callback(
-                '🟢 BLOCKDAN CHIQARISH',
-                `unblock_${user.id}`
-            )
-        ]);
-    } else {
-        buttons.push([
-            Markup.button.callback(
-                '🚫 BLOCK QILISH',
-                `block_${user.id}`
-            )
-        ]);
-    }
-
-    buttons.push([
-        Markup.button.callback(
-            '🔙 Foydalanuvchilar',
-            'adm_users'
-        )
-    ]);
-
-    await ctx.reply(
-        text,
-        {
-            parse_mode: 'HTML',
-            ...Markup.inlineKeyboard(buttons)
-        }
-    );
-});
-
-// ============================================================
-// BLOCK
-// ============================================================
-
-bot.action(/^block_(\d+)$/, async (ctx) => {
-
-    if (!isAdmin(ctx)) return;
-
-    const id = Number(ctx.match[1]);
-
-    if (id === Number(ADMIN_ID)) {
-        await ctx.answerCbQuery(
-            '❌ Adminni block qilib bo‘lmaydi.',
-            { show_alert: true }
-        );
-        return;
-    }
-
-    const user = getUser(id);
-
-    if (!user) {
-        await ctx.answerCbQuery(
-            'Foydalanuvchi topilmadi.',
-            { show_alert: true }
-        );
-        return;
-    }
-
-    updateUser(id, {
-        blocked: 1,
-        block_reason: 'Admin tomonidan bloklandi'
-    });
-
-    await ctx.answerCbQuery(
-        '🚫 Foydalanuvchi bloklandi.'
-    );
-
-    await ctx.reply(
-        `🚫 <b>Foydalanuvchi bloklandi.</b>\n\n` +
-        `ID: <code>${id}</code>`,
-        {
-            parse_mode: 'HTML',
-            ...Markup.inlineKeyboard([
-                [
-                    Markup.button.callback(
-                        '🟢 BLOCKDAN CHIQARISH',
-                        `unblock_${id}`
-                    )
-                ],
-                [
-                    Markup.button.callback(
-                        '🔙 Foydalanuvchilar',
-                        'adm_users'
-                    )
-                ]
-            ])
-        }
-    );
-});
-
-// ============================================================
-// UNBLOCK
-// ============================================================
-
-bot.action(/^unblock_(\d+)$/, async (ctx) => {
-
-    if (!isAdmin(ctx)) return;
-
-    const id = Number(ctx.match[1]);
-
-    updateUser(id, {
-        blocked: 0,
-        block_reason: ''
-    });
-
-    await ctx.answerCbQuery(
-        '🟢 Blockdan chiqarildi.'
-    );
-
-    await ctx.reply(
-        `🟢 <b>Foydalanuvchi blockdan chiqarildi.</b>\n\n` +
-        `ID: <code>${id}</code>`,
-        {
-            parse_mode: 'HTML',
-            ...Markup.inlineKeyboard([
-                [
-                    Markup.button.callback(
-                        '👤 Profil',
-                        `user_${id}`
-                    )
-                ],
-                [
-                    Markup.button.callback(
-                        '🔙 Foydalanuvchilar',
-                        'adm_users'
-                    )
-                ]
-            ])
-        }
-    );
-});
-
-// ============================================================
-// ADMIN BLOCK MENU
-// ============================================================
-
-bot.action('adm_block_menu', async (ctx) => {
-
-    if (!isAdmin(ctx)) return;
-
-    await ctx.answerCbQuery().catch(() => {});
-
-    const users = db.prepare(`
-        SELECT *
-        FROM users
-        ORDER BY last_seen DESC
-        LIMIT 50
-    `).all();
-
-    const buttons = users.map(user => {
-
-        const name =
-            `${user.first_name || ''} ${user.last_name || ''}`.trim() ||
-            String(user.id);
-
-        return [
-            Markup.button.callback(
-                `${user.blocked ? '🚫' : '🟢'} ${name.slice(0, 22)}`,
-                `user_${user.id}`
-            )
-        ];
-    });
-
-    buttons.push([
-        Markup.button.callback(
-            '🔙 Orqaga',
-            'adm_back'
-        )
-    ]);
-
-    await ctx.reply(
-        '🚫 <b>BLOCK / UNBLOCK</b>\n\n' +
-        'Foydalanuvchini tanlang:',
-        {
-            parse_mode: 'HTML',
-            ...Markup.inlineKeyboard(buttons)
-        }
-    );
-});
-
-// ============================================================
-// ADMIN BOT DATA
-// ============================================================
-
-bot.action('adm_data', async (ctx) => {
-
-    if (!isAdmin(ctx)) return;
-
-    await ctx.answerCbQuery().catch(() => {});
-
-    await ctx.reply(
-        '📝 <b>BOT MA’LUMOTLARI</b>\n\n' +
-        `📞 Telefon: <code>${escapeHtml(getBotData('phone'))}</code>\n` +
-        `💬 Telegram: <code>${escapeHtml(getBotData('telegram'))}</code>\n` +
-        `📸 Instagram: <code>${escapeHtml(getBotData('instagram'))}</code>\n` +
-        `📢 Kanal: <code>${escapeHtml(getBotData('channel'))}</code>\n\n` +
-        'Qaysi ma’lumotni yangilamoqchisiz?',
-        {
-            parse_mode: 'HTML',
-            ...Markup.inlineKeyboard([
-                [
-                    Markup.button.callback(
-                        '📞 Telefon',
-                        'edit_phone'
-                    )
-                ],
-                [
-                    Markup.button.callback(
-                        '💬 Telegram',
-                        'edit_telegram'
-                    )
-                ],
-                [
-                    Markup.button.callback(
-                        '📸 Instagram',
-                        'edit_instagram'
-                    )
-                ],
-                [
-                    Markup.button.callback(
-                        '📢 Kanal',
-                        'edit_channel'
-                    )
-                ],
-                [
-                    Markup.button.callback(
-                        '🔙 Orqaga',
-                        'adm_back'
-                    )
-                ]
-            ])
-        }
-    );
-});
-
-const dataEditMap = {
-    edit_phone: 'phone',
-    edit_telegram: 'telegram',
-    edit_instagram: 'instagram',
-    edit_channel: 'channel'
-};
-
-for (const [action, key] of Object.entries(dataEditMap)) {
-
-    bot.action(action, async (ctx) => {
-
-        if (!isAdmin(ctx)) return;
-
-        await ctx.answerCbQuery().catch(() => {});
-
-        updateUser(ctx.from.id, {
-            state: `data_${key}`
-        });
-
-        await ctx.reply(
-            `✏️ <b>${escapeHtml(key)}</b> yangi qiymatini yuboring:`,
-            { parse_mode: 'HTML' }
-        );
-    });
-}
-
-// ============================================================
-// LANGUAGE
-// ============================================================
-
-bot.action('lang_uz', async (ctx) => {
-
-    ensureUser(ctx);
-
-    updateUser(ctx.from.id, {
-        language: 'uz'
-    });
-
-    await ctx.answerCbQuery('🇺🇿 O‘zbek tili');
-
-    await ctx.reply(
-        '🇺🇿 <b>O‘zbek tili faollashdi.</b>\n\n' +
-        'Kerakli bo‘limni tanlang 👇',
-        {
-            parse_mode: 'HTML',
-            ...mainMenu('uz')
-        }
-    );
-});
-
-bot.action('lang_ru', async (ctx) => {
-
-    ensureUser(ctx);
-
-    updateUser(ctx.from.id, {
-        language: 'ru'
-    });
-
-    await ctx.answerCbQuery('🇷🇺 Русский');
-
-    await ctx.reply(
-        '🇷🇺 <b>Русский язык активирован.</b>\n\n' +
-        'Выберите нужный раздел 👇',
-        {
-            parse_mode: 'HTML',
-            ...mainMenu('ru')
-        }
-    );
-});
-
-bot.action('lang_en', async (ctx) => {
-
-    ensureUser(ctx);
-
-    updateUser(ctx.from.id, {
-        language: 'en'
-    });
-
-    await ctx.answerCbQuery('🇬🇧 English');
-
-    await ctx.reply(
-        '🇬🇧 <b>English activated.</b>\n\n' +
-        'Choose a section 👇',
-        {
-            parse_mode: 'HTML',
-            ...mainMenu('en')
-        }
-    );
-});
-
-bot.hears(
-    ['🌐 Tilni o‘zgartirish', '🌐 Изменить язык', '🌐 Change Language'],
-    async (ctx) => {
-
-        await ctx.reply(
-            '🌐 <b>Tilni tanlang:</b>',
-            {
-                parse_mode: 'HTML',
-                ...Markup.inlineKeyboard([
-                    [
-                        Markup.button.callback(
-                            '🇺🇿 O‘zbekcha',
-                            'lang_uz'
-                        ),
-                        Markup.button.callback(
-                            '🇷🇺 Русский',
-                            'lang_ru'
-                        ),
-                        Markup.button.callback(
-                            '🇬🇧 English',
-                            'lang_en'
-                        )
-                    ]
-                ])
-            }
-        );
-    }
-);
 
 // ============================================================
 // PORTFOLIO
 // ============================================================
+bot.hears(['💻 Bizning ishlar (Portfolio)', '💻 Портфолио проектов', '💻 Portfolio'], async ctx => {
+    if (!(await ensureAccess(ctx))) return;
 
-bot.hears(
-    [
-        '💻 Bizning ishlar',
-        '💻 Портфолио проектов',
-        '💻 Portfolio'
-    ],
-    async (ctx) => {
+    const kb = Markup.inlineKeyboard([
+        [Markup.button.url('🌐 HumoGarden.uz', 'https://humogarden.uz')],
+        [Markup.button.url('🌐 Portfolio 01', 'https://glittery-rugelach-e63860.netlify.app/')],
+        [Markup.button.url('🌐 Portfolio 02', 'https://fastidious-dieffenbachia-94b656.netlify.app/')],
+        [Markup.button.url('🌐 Portfolio 03', 'https://magenta-blini-956248.netlify.app/')],
+        [Markup.button.url('🌐 Portfolio 04', 'https://heartfelt-manatee-645764.netlify.app/')],
+        [Markup.button.url('🌐 Portfolio 05', 'https://harmonious-halva-0fe592.netlify.app/')],
+        [Markup.button.url('🌐 Portfolio 06', 'https://fastidious-starburst-7aa5e3.netlify.app/')]
+    ]);
 
-        const text =
-            '💻 <b>Bilol | Web Developer</b>\n\n' +
-            'Biz amalga oshirgan eng so‘nggi muvaffaqiyatli loyihalar:\n\n' +
-            'O‘zingizga yoqqan namunani tanlang 👇';
-
-        const keyboard = Markup.inlineKeyboard([
-
-            [
-                Markup.button.url(
-                    '🌐 Humo Garden',
-                    'https://humogarden.uz'
-                )
-            ],
-
-            [
-                Markup.button.url(
-                    '🌐 Portfolio #2',
-                    'https://glittery-rugelach-e63860.netlify.app/'
-                )
-            ],
-
-            [
-                Markup.button.url(
-                    '🌐 Portfolio #3',
-                    'https://fastidious-dieffenbachia-94b656.netlify.app/'
-                )
-            ],
-
-            [
-                Markup.button.url(
-                    '🌐 Portfolio #4',
-                    'https://magenta-blini-956248.netlify.app/'
-                )
-            ],
-
-            [
-                Markup.button.url(
-                    '🌐 Portfolio #5',
-                    'https://heartfelt-manatee-645764.netlify.app/'
-                )
-            ],
-
-            [
-                Markup.button.url(
-                    '🌐 Portfolio #6',
-                    'https://harmonious-halva-0fe592.netlify.app/'
-                )
-            ],
-
-            [
-                Markup.button.url(
-                    '🌐 Project #7',
-                    'https://app.netlify.com/projects/lighthearted-creponne-62b31a/overview'
-                )
-            ]
-        ]);
-
-        await ctx.reply(
-            text,
-            {
-                parse_mode: 'HTML',
-                disable_web_page_preview: true,
-                ...keyboard
-            }
-        );
-    }
-);
+    await ctx.reply(
+        '💻 <b>BILOL | WEB DEVELOPER — PORTFOLIO</b>\n\n' +
+        'Biz amalga oshirgan loyihalar bilan tanishing.\n\n' +
+        '👇 Loyihani tanlang va saytni to‘g‘ridan-to‘g‘ri oching:',
+        { parse_mode: 'HTML', ...kb }
+    );
+});
 
 // ============================================================
 // SERVICES
 // ============================================================
-
-function servicesKeyboard() {
-
-    return Markup.inlineKeyboard([
-
-        [
-            Markup.button.callback(
-                '🚀 Landing Page — 500 000 so‘m',
-                'srv_landing'
-            )
-        ],
-
-        [
-            Markup.button.callback(
-                '🛒 E-Commerce — 1 200 000 so‘m',
-                'srv_shop'
-            )
-        ],
-
-        [
-            Markup.button.callback(
-                '🏢 Korporativ sayt — 800 000 so‘m',
-                'srv_corporate'
-            )
-        ],
-
-        [
-            Markup.button.callback(
-                '🤖 Telegram Bot — 400 000 so‘m',
-                'srv_bot'
-            )
-        ],
-
-        [
-            Markup.button.callback(
-                '📱 Web Application — 2 000 000 so‘m',
-                'srv_webapp'
-            )
-        ]
-    ]);
-}
-
-bot.hears(
-    [
-        '⚙️ Xizmatlar va Narxlar',
-        '⚙️ Услуги и цены',
-        '⚙️ Services & Pricing'
-    ],
-    async (ctx) => {
-
-        await ctx.reply(
-            '🛠 <b>Bilol | Web Developer — Professional xizmatlarimiz</b>\n\n' +
-
-            '💡 <b>Muhim eslatma:</b>\n' +
-            'Narxlar loyihaning murakkabligiga qarab yana kelishiladi. ' +
-            'Hamyonbob va sifatli natija. 🤝\n\n' +
-
-            '📌 <b>To‘lov sharti:</b>\n' +
-            'Barcha loyihalar uchun 50% oldindan to‘lov amalga oshiriladi.\n\n' +
-
-            'Quyidagi yo‘nalishlardan birini tanlang 👇',
-            {
-                parse_mode: 'HTML',
-                ...servicesKeyboard()
-            }
-        );
-    }
-);
-
-// ============================================================
-// SERVICE DETAILS
-// ============================================================
-
 const services = {
-
-    landing: {
-        name: 'Landing Page / Sotuvchi sayt',
-        price: 500000,
-        display: '500,000 so‘m ($40)',
-        duration: '2–4 kun',
-        advance: '250,000 so‘m'
-    },
-
-    shop: {
-        name: 'E-Commerce / Onlayn do‘kon',
-        price: 1200000,
-        display: '1,200,000 so‘m ($100)',
-        duration: '7–10 kun',
-        advance: '600,000 so‘m'
-    },
-
-    corporate: {
-        name: 'Korporativ veb-sayt',
-        price: 800000,
-        display: '800,000 so‘m ($65)',
-        duration: '3–5 kun',
-        advance: '400,000 so‘m'
-    },
-
-    bot: {
-        name: 'Telegram Bot va avtomatlashtirish',
-        price: 400000,
-        display: '400,000 so‘m ($30)',
-        duration: '2–5 kun',
-        advance: '200,000 so‘m'
-    },
-
-    webapp: {
-        name: 'Web Application / Veb-ilova',
-        price: 2000000,
-        display: '2,000,000 so‘m ($160)',
-        duration: '10–15 kun',
-        advance: '1,000,000 so‘m'
-    }
+    landing:   { title: '🚀 Landing Page',       desc: 'Sotuvchi, zamonaviy biznes sayti',   price: 500000,  usd: '$40',  duration: '2–4 kun' },
+    shop:      { title: '🛒 E-Commerce',         desc: 'Online do‘kon va buyurtma tizimi',   price: 1200000, usd: '$100', duration: '7–10 kun' },
+    corporate: { title: '🏢 Korporativ veb-sayt',desc: 'Kompaniya uchun professional sayt',  price: 800000,  usd: '$65',  duration: '3–5 kun' },
+    bot:       { title: '🤖 Telegram Bot',       desc: 'Biznes bot va avtomatlashtirish',    price: 400000,  usd: '$30',  duration: '2–5 kun' },
+    webapp:    { title: '📱 Web Application',    desc: 'Murakkab veb-ilova va platforma',    price: 2000000, usd: '$160', duration: '10–15 kun' },
+    ai:        { title: '🧠 AI yechim',          desc: 'AI botlar va aqlli tizimlar',        price: 1500000, usd: '$120', duration: '5–15 kun' },
+    design:    { title: '🎨 Logo & Dizayn',      desc: 'Brend va vizual dizayn',             price: 300000,  usd: '$25',  duration: '1–3 kun' },
+    animation: { title: '✨ Animatsiya',         desc: 'Logo, reklama va motion dizayn',     price: 500000,  usd: '$40',  duration: '2–5 kun' }
 };
 
-bot.action(/^srv_(landing|shop|corporate|bot|webapp)$/, async (ctx) => {
+function servicesKeyboard() {
+    const rows = Object.keys(services).map(k => [Markup.button.callback(services[k].title, `service_${k}`)]);
+    return Markup.inlineKeyboard(rows);
+}
 
-    await ctx.answerCbQuery().catch(() => {});
-
-    const type = ctx.match[1];
-    const service = services[type];
-
-    updateUser(ctx.from.id, {
-        pending_service: type,
-        detected_service: service.name,
-        min_price: service.price
-    });
+bot.hears(['⚙️ Xizmatlar va Narxlar', '⚙️ Услуги и Прайс', '⚙️ Services & Pricing'], async ctx => {
+    if (!(await ensureAccess(ctx))) return;
 
     await ctx.reply(
-        `🛠 <b>${escapeHtml(service.name)}</b>\n\n` +
+        '🛠 <b>BILOL | WEB DEVELOPER — PROFESSIONAL XIZMATLAR</b>\n\n' +
+        'Biznesingiz uchun zamonaviy raqamli mahsulotlar yaratamiz.\n\n' +
+        '💻 Web-saytlar  •  🛒 Online do‘konlar\n' +
+        '🤖 Telegram botlar  •  🧠 AI yechimlar\n' +
+        '📱 Web ilovalar  •  🎨 Logo & dizayn\n' +
+        '✨ Animatsiya\n\n' +
+        '💡 <b>Muhim:</b> Yakuniy narx loyiha murakkabligiga qarab o‘zaro kelishiladi.\n\n' +
+        '📌 <b>To‘lov:</b> barcha loyihalarda 50% oldindan to‘lov.\n\n' +
+        '👇 Xizmat turini tanlang:',
+        { parse_mode: 'HTML', ...servicesKeyboard() }
+    );
+});
 
-        `⏱ <b>Muddat:</b> ${service.duration}\n` +
+bot.action(/^service_(.+)$/, async ctx => {
+    await ctx.answerCbQuery().catch(() => {});
+    if (!(await ensureAccess(ctx))) return;
+    const type = ctx.match[1];
+    const s = services[type];
+    if (!s) return;
 
-        `💰 <b>Narxi:</b> ${service.display} dan boshlanadi\n` +
-
-        '🤝 <b>Kelishuv:</b> Yakuniy narx loyiha murakkabligiga qarab kelishiladi.\n' +
-
-        `💳 <b>50% oldindan:</b> ${service.advance}\n\n` +
-
-        'Buyurtma berishni xohlaysizmi?',
+    await ctx.reply(
+        `<b>${s.title}</b>\n\n` +
+        `💡 ${esc(s.desc)}\n\n` +
+        `💰 <b>Narxi:</b> ${s.price.toLocaleString('uz-UZ')} so‘m (${s.usd}) dan boshlanadi.\n` +
+        `⏱ <b>Muddat:</b> ${s.duration}\n\n` +
+        '🤝 Yakuniy narx loyiha talablariga qarab kelishiladi.\n' +
+        '📌 50% oldindan to‘lov.\n\n' +
+        'Buyurtma bermoqchimisiz?',
         {
             parse_mode: 'HTML',
-            ...Markup.inlineKeyboard([
-                [
-                    Markup.button.callback(
-                        '✨ Shu xizmatga buyurtma berish',
-                        `order_${type}`
-                    )
-                ]
-            ])
+            ...Markup.inlineKeyboard([[Markup.button.callback('✅ Shu xizmatga buyurtma', `order_service_${type}`)]])
         }
     );
 });
 
 // ============================================================
-// ORDER START
+// ORDER
 // ============================================================
+function agreementKeyboard() {
+    return Markup.inlineKeyboard([[
+        Markup.button.callback('✅ Roziman', 'agree_yes'),
+        Markup.button.callback('❌ Bekor qilish', 'agree_no')
+    ]]);
+}
 
-function askAgreement(ctx) {
-
-    return ctx.reply(
-        '🤝 <b>Buyurtma shartlari bilan tanishish</b>\n\n' +
-        'Barcha loyihalar uchun <b>50% oldindan to‘lov</b> amalga oshiriladi ' +
-        'va qolgan narxlar o‘zaro kelishiladi.\n\n' +
+async function askAgreement(ctx) {
+    await ctx.reply(
+        '🤝 <b>BUYURTMA SHARTLARI</b>\n\n' +
+        'Barcha loyihalar uchun <b>50% oldindan to‘lov</b> amalga oshiriladi.\n\n' +
+        'Qolgan narx va yakuniy summa loyiha talablariga qarab o‘zaro kelishiladi.\n\n' +
         'Ushbu shartga rozimisiz?',
-        {
-            parse_mode: 'HTML',
-            ...Markup.inlineKeyboard([
-                [
-                    Markup.button.callback(
-                        '✅ Roziman',
-                        'agree_yes'
-                    ),
-                    Markup.button.callback(
-                        '❌ Bekor qilish',
-                        'agree_no'
-                    )
-                ]
-            ])
-        }
+        { parse_mode: 'HTML', ...agreementKeyboard() }
     );
 }
 
-bot.action(/^order_(landing|shop|corporate|bot|webapp)$/, async (ctx) => {
-
-    await ctx.answerCbQuery().catch(() => {});
-
-    const type = ctx.match[1];
-
-    const service = services[type];
-
-    updateUser(ctx.from.id, {
-        pending_service: type,
-        detected_service: service.name,
-        min_price: service.price
-    });
-
+bot.hears(['💻 Loyihaga buyurtma', '💻 Заказать проект', '💻 Order Project'], async ctx => {
+    if (!(await ensureAccess(ctx))) return;
+    getState(ctx.from.id).pendingService = 'Umumiy murojaat';
     await askAgreement(ctx);
 });
 
-bot.hears(
-    [
-        '💻 Buyurtma berish',
-        '💻 Заказать проект',
-        '💻 Order Project'
-    ],
-    async (ctx) => {
-
-        updateUser(ctx.from.id, {
-            pending_service: 'Umumiy murojaat',
-            detected_service: '',
-            min_price: 0
-        });
-
-        await askAgreement(ctx);
-    }
-);
-
-bot.action('agree_no', async (ctx) => {
-
-    await ctx.answerCbQuery('Bekor qilindi');
-
-    updateUser(ctx.from.id, {
-        state: '',
-        pending_service: '',
-        client_full_name: '',
-        order_description: '',
-        detected_service: '',
-        min_price: 0,
-        client_budget: ''
-    });
-
-    await ctx.reply(
-        '❌ <b>Buyurtma jarayoni bekor qilindi.</b>',
-        {
-            parse_mode: 'HTML',
-            ...mainMenu(
-                getUser(ctx.from.id)?.language || 'uz'
-            )
-        }
-    );
+bot.action(/^order_service_(.+)$/, async ctx => {
+    await ctx.answerCbQuery().catch(() => {});
+    if (!(await ensureAccess(ctx))) return;
+    const type = ctx.match[1];
+    if (!services[type]) return;
+    getState(ctx.from.id).pendingService = type;
+    await askAgreement(ctx);
 });
 
-bot.action('agree_yes', async (ctx) => {
+bot.action('agree_no', async ctx => {
+    await ctx.answerCbQuery().catch(() => {});
+    resetTempState(ctx.from.id);
+    await ctx.editMessageText('❌ Buyurtma jarayoni bekor qilindi.').catch(() => {});
+});
 
-    await ctx.answerCbQuery('Rozilik qabul qilindi');
-
-    updateUser(ctx.from.id, {
-        state: 'waiting_name'
-    });
-
-    await ctx.reply(
-        '✅ <b>Rozilik qabul qilindi. Ajoyib tanlov!</b> 🚀\n\n' +
-        '📝 Iltimos, <b>ism va familiyangizni to‘liq</b> kiriting.\n\n' +
-        'Masalan: <i>Alisherbek Usmonov</i>',
+bot.action('agree_yes', async ctx => {
+    await ctx.answerCbQuery().catch(() => {});
+    const s = getState(ctx.from.id);
+    s.agreed = true;
+    s.waitingForName = true;
+    await ctx.editMessageText(
+        '✅ <b>Rozilik qabul qilindi!</b>\n\n' +
+        '🚀 Ajoyib tanlov.\n\n' +
+        '📝 Iltimos, ism va familiyangizni to‘liq kiriting.\n\n' +
+        'Masalan: <b>Alisherbek Usmonov</b>',
         { parse_mode: 'HTML' }
-    );
+    ).catch(() => {});
 });
 
 // ============================================================
-// ORDER TEXT FLOW
+// SERVICE DETECT
 // ============================================================
+function detectService(text) {
+    const t = text.toLowerCase();
 
+    if (/(ilova|app|web app|veb.?ilova)/.test(t))
+        return { type: 'webapp', title: 'Murakkab veb-ilova (Web Application)', price: 2000000, usd: '$160' };
+    if (/(do[‘'`]?kon|magazin|shop|savdo|market|uzum)/.test(t))
+        return { type: 'shop', title: 'Onlayn do‘kon (E-Commerce)', price: 1200000, usd: '$100' };
+    if (/(bank|moliya|fintech|kredit)/.test(t))
+        return { type: 'webapp', title: 'Bank va Moliya tizimi', price: 2500000, usd: '$200' };
+    if (/(taksi|taxi|logistika|dostavka|yetkazib)/.test(t))
+        return { type: 'landing', title: 'Taksi / Logistika tizimi', price: 800000, usd: '$65' };
+    if (/(telegram bot|\bbot\b|telegram)/.test(t))
+        return { type: 'bot', title: 'Telegram bot va avtomatlashtirish', price: 400000, usd: '$30' };
+    if (/(\bai\b|sun.?iy intellekt|sun'iy intellekt)/.test(t))
+        return { type: 'ai', title: 'AI yechim', price: 1500000, usd: '$120' };
+    if (/(logo|dizayn|design)/.test(t))
+        return { type: 'design', title: 'Logo & Dizayn', price: 300000, usd: '$25' };
+    if (/(animatsiya|motion)/.test(t))
+        return { type: 'animation', title: 'Animatsiya / Motion Design', price: 500000, usd: '$40' };
+    if (/(sayt|site|landing|veb|web|katalog|korporativ)/.test(t))
+        return { type: 'landing', title: 'Landing Page / Veb-sayt', price: 500000, usd: '$40' };
+
+    return null;
+}
+
+// ============================================================
+// TEXT HANDLER
+// ============================================================
 bot.on('text', async (ctx, next) => {
-
-    if (isAdmin(ctx)) return next();
-
-    const user = getUser(ctx.from.id);
-
-    if (!user) return next();
-
+    const userId = ctx.from.id;
     const text = ctx.message.text.trim();
+    const s = getState(userId);
 
-    // NAME
-    if (user.state === 'waiting_name') {
-
-        const words = text.split(/\s+/);
-
-        if (
-            words.length < 2 ||
-            text.length < 5 ||
-            /\d/.test(text)
-        ) {
-            await ctx.reply(
-                '❌ <b>Ism va familiya noto‘g‘ri kiritildi.</b>\n\n' +
-                'Iltimos, to‘liq ism va familiyangizni yozing.\n\n' +
-                'Masalan: <i>Alisherbek Usmonov</i>',
-                { parse_mode: 'HTML' }
-            );
-            return;
+    // Admin password
+    if (isAdmin(ctx) && s.waitingForAdminPassword) {
+        if (text === ADMIN_PASSWORD) {
+            s.waitingForAdminPassword = false;
+            return showAdminPanel(ctx);
         }
+        return ctx.reply('❌ Parol noto‘g‘ri. Qaytadan kiriting:');
+    }
 
-        updateUser(ctx.from.id, {
-            client_full_name: text,
-            state: 'waiting_description'
-        });
+    // Admin broadcast
+    if (isAdmin(ctx) && s.waitingForBroadcast) {
+        return processBroadcast(ctx);
+    }
 
-        await ctx.reply(
+    // Admin channel post
+    if (isAdmin(ctx) && s.waitingForChannelPost) {
+        return processChannelPost(ctx);
+    }
+
+    // Order name
+    if (s.waitingForName) {
+        const words = text.split(/\s+/).filter(Boolean);
+        if (words.length < 2 || text.length < 5) {
+            return ctx.reply('❌ <b>Ism va familiya to‘liq bo‘lishi kerak!</b>\n\nMasalan: <b>Alisherbek Usmonov</b>', { parse_mode: 'HTML' });
+        }
+        s.clientFullName = text;
+        s.waitingForName = false;
+        s.waitingForOrderDesc = true;
+        return ctx.reply(
             '🎯 <b>Ajoyib!</b>\n\n' +
-            'Endi qisqacha <b>nima buyurtma qilmoqchisiz</b> va ' +
-            'loyihangiz haqida batafsil yozib yuboring.\n\n' +
-
-            'Masalan:\n' +
-            '• biznes uchun web sayt\n' +
-            '• online do‘kon\n' +
-            '• Telegram bot\n' +
-            '• ilova\n' +
-            '• landing page\n' +
-            '• korporativ sayt',
+            'Endi nima buyurtma qilmoqchi ekaningizni va loyiha haqida batafsil yozing.\n\n' +
+            'Masalan: <i>"Taksi xizmati uchun buyurtma sayti kerak"</i>',
             { parse_mode: 'HTML' }
         );
-
-        return;
     }
 
-    // DESCRIPTION
-    if (user.state === 'waiting_description') {
+    // Order description
+    if (s.waitingForOrderDesc) {
+        if (text.length < 4) return ctx.reply('❌ Loyiha haqida batafsilroq yozing.');
 
-        if (text.length < 4) {
-
-            await ctx.reply(
-                '❌ Iltimos, loyiha haqida batafsilroq yozing.',
-                { parse_mode: 'HTML' }
-            );
-
-            return;
-        }
-
-        const lower = text.toLowerCase();
-
-        let service = null;
-
-        // ENG MUHIM: ilova birinchi
-        if (
-            lower.includes('ilova') ||
-            lower.includes('app') ||
-            lower.includes('application') ||
-            lower.includes('veb-ilova') ||
-            lower.includes('web app')
-        ) {
-            service = {
-                name: 'Murakkab veb-ilova (Web Application)',
-                price: 2000000,
-                display: '2,000,000 so‘m ($160)'
-            };
-        }
-
-        else if (
-            lower.includes('do‘kon') ||
-            lower.includes("do'kon") ||
-            lower.includes('magazin') ||
-            lower.includes('shop') ||
-            lower.includes('e-commerce') ||
-            lower.includes('ecommerce') ||
-            lower.includes('savdo') ||
-            lower.includes('market') ||
-            lower.includes('uzum')
-        ) {
-            service = {
-                name: 'Onlayn do‘kon (E-Commerce)',
-                price: 1200000,
-                display: '1,200,000 so‘m ($100)'
-            };
-        }
-
-        else if (
-            lower.includes('taksi') ||
-            lower.includes('taxi') ||
-            lower.includes('logistika') ||
-            lower.includes('dostavka') ||
-            lower.includes('yetkazib')
-        ) {
-            service = {
-                name: 'Logistika va taksi avtomatlashtirish tizimi',
-                price: 800000,
-                display: '800,000 so‘m ($65)'
-            };
-        }
-
-        else if (
-            lower.includes('bot') ||
-            lower.includes('telegram bot') ||
-            lower.includes('telegram')
-        ) {
-            service = {
-                name: 'Telegram Bot va avtomatlashtirish',
-                price: 400000,
-                display: '400,000 so‘m ($30)'
-            };
-        }
-
-        else if (
-            lower.includes('landing') ||
-            lower.includes('sayt') ||
-            lower.includes('website') ||
-            lower.includes('web site') ||
-            lower.includes('website') ||
-            lower.includes('vizitka') ||
-            lower.includes('korporativ')
-        ) {
-            if (lower.includes('korporativ')) {
-                service = {
-                    name: 'Korporativ veb-sayt',
-                    price: 800000,
-                    display: '800,000 so‘m ($65)'
-                };
-            } else {
-                service = {
-                    name: 'Landing Page / Veb-sayt',
-                    price: 500000,
-                    display: '500,000 so‘m ($40)'
-                };
-            }
-        }
-
-        // BANK
-        else if (
-            lower.includes('bank') ||
-            lower.includes('moliya') ||
-            lower.includes('fintech') ||
-            lower.includes('kredit')
-        ) {
-            service = {
-                name: 'Bank / Moliya tizimi',
-                price: 2500000,
-                display: '2,500,000 so‘m ($200)'
-            };
-        }
-
-        if (!service) {
-
-            updateUser(ctx.from.id, {
-                state: ''
-            });
-
-            await ctx.reply(
-                '❌ <b>Kechirasiz, bu loyiha yo‘nalishi avtomatik aniqlanmadi.</b>\n\n' +
-                'Bunday loyiha uchun narxni individual hisoblash kerak.\n\n' +
-                '💬 Admin bilan bog‘laning:',
+        const detected = detectService(text);
+        if (!detected) {
+            s.waitingForOrderDesc = false;
+            return ctx.reply(
+                '❌ <b>Kechirasiz, bu yo‘nalish bo‘yicha tayyor xizmat turi topilmadi.</b>\n\n' +
+                'Batafsil ma’lumot va narxni kelishish uchun admin bilan bog‘laning 👇',
                 {
                     parse_mode: 'HTML',
-                    ...Markup.inlineKeyboard([
-                        [
-                            Markup.button.url(
-                                '💬 @sharipoov1 bilan bog‘lanish',
-                                ADMIN_USERNAME
-                            )
-                        ],
-                        [
-                            Markup.button.callback(
-                                '🔙 Asosiy menyu',
-                                'go_home'
-                            )
-                        ]
-                    ])
+                    ...Markup.inlineKeyboard([[Markup.button.url('💬 Admin bilan bog‘lanish', ADMIN_USERNAME)]])
                 }
             );
-
-            return;
         }
 
-        updateUser(ctx.from.id, {
-            order_description: text,
-            detected_service: service.name,
-            min_price: service.price,
-            state: 'waiting_budget'
-        });
+        s.detectedService = detected;
+        s.orderDescription = text;
+        s.waitingForOrderDesc = false;
+        s.waitingForBudget = true;
 
-        await ctx.reply(
-            '💡 <b>Tushunarli.</b>\n\n' +
-            `📌 Sizning loyihangiz: <b>${escapeHtml(service.name)}</b>\n\n` +
-            `💰 Bunday loyiha narxi <b>${service.display}</b> dan boshlanadi.\n\n` +
-            '💵 <b>Endi aniq budjetingizni kiriting.</b>\n' +
-            `⚠️ Budjet <b>${service.display}</b> dan kam bo‘lmasligi kerak.\n\n` +
-            'Masalan: <code>2000000</code> yoki <code>2 000 000</code>',
+        return ctx.reply(
+            '💡 <b>Tushunarli!</b>\n\n' +
+            `📌 <b>${esc(detected.title)}</b>\n\n` +
+            `💰 Bunday loyiha narxi <b>${detected.price.toLocaleString('uz-UZ')} so‘m (${detected.usd})</b> dan boshlanadi.\n\n` +
+            '⚠️ Budjetingiz ushbu summadan kam bo‘lmasligi kerak.\n\n' +
+            '💰 Ushbu loyiha uchun ajratgan budjetingiz qancha?\n\n' +
+            'Masalan: <b>2 000 000</b>',
             { parse_mode: 'HTML' }
         );
-
-        return;
     }
 
-    // BUDGET
-    if (user.state === 'waiting_budget') {
+    // Budget
+    if (s.waitingForBudget) {
+        const clean = text.replace(/[^\d]/g, '');
+        if (!clean) return ctx.reply('❌ Budjetni aniq raqam bilan kiriting.\n\nMasalan: 2 000 000');
 
-        const raw = text.replace(/[^\d]/g, '');
+        const amount = Number(clean);
+        const min = s.detectedService?.price || 0;
 
-        if (!raw || !/^\d+$/.test(raw)) {
-
-            await ctx.reply(
-                '❌ <b>Faqat aniq raqam kiriting.</b>\n\n' +
-                'Masalan: <code>2000000</code>',
+        if (amount < min) {
+            return ctx.reply(
+                '❌ <b>Budjet minimal summadan kam!</b>\n\n' +
+                `📌 Minimal narx: <b>${min.toLocaleString('uz-UZ')} so‘m</b>\n\n` +
+                `Iltimos, ${min.toLocaleString('uz-UZ')} so‘mdan kam bo‘lmagan budjet kiriting.`,
                 { parse_mode: 'HTML' }
             );
-
-            return;
         }
 
-        const budget = Number(raw);
+        s.clientBudget = text;
+        s.waitingForBudget = false;
+        s.waitingForOrderPhone = true;
 
-        if (!Number.isSafeInteger(budget)) {
-
-            await ctx.reply(
-                '❌ Budjet raqami juda katta.',
-                { parse_mode: 'HTML' }
-            );
-
-            return;
-        }
-
-        if (budget < user.min_price) {
-
-            await ctx.reply(
-                '❌ <b>Budjet yetarli emas.</b>\n\n' +
-                `📌 Ushbu loyiha uchun minimal narx: <b>${user.min_price.toLocaleString('uz-UZ')} so‘m</b>\n\n` +
-                'Iltimos, shu summadan kam bo‘lmagan aniq budjet kiriting.',
-                { parse_mode: 'HTML' }
-            );
-
-            return;
-        }
-
-        updateUser(ctx.from.id, {
-            client_budget: budget.toLocaleString('uz-UZ') + ' so‘m',
-            state: 'waiting_order_phone'
-        });
-
-        await ctx.reply(
+        return ctx.reply(
             '📞 <b>Ajoyib! Oxirgi qadam.</b>\n\n' +
-            'Aloqa uchun telefon raqamingizni yuboring.\n\n' +
-            '⚠️ Raqamni yozmang.\n' +
-            '<b>Pastdagi tugmani bosib Telegram kontaktini yuboring.</b>',
-            {
-                parse_mode: 'HTML',
-                ...Markup.keyboard([
-                    [
-                        Markup.button.contactRequest(
-                            '📱 Telefon raqamimni yuborish'
-                        )
-                    ]
-                ]).resize()
-            }
+            'Aloqa uchun telefon raqamingizni pastdagi tugma orqali yuboring.\n\n' +
+            '⚠️ Telefonni qo‘lda yozish qabul qilinmaydi.',
+            { parse_mode: 'HTML', ...phoneKeyboard() }
         );
+    }
 
-        return;
+    // Review
+    if (s.waitingForReview) {
+        s.waitingForReview = false;
+        db.prepare(`INSERT INTO reviews (user_id, rating, review_text) VALUES (?,?,?)`)
+          .run(userId, s.reviewRating || 5, text);
+
+        bot.telegram.sendMessage(ADMIN_ID,
+            '⭐️ <b>YANGI MIJOZ FIKRI</b>\n\n' +
+            `👤 ${esc(ctx.from.first_name)}\n` +
+            `🔗 @${esc(ctx.from.username || 'yo‘q')}\n` +
+            `🆔 <code>${userId}</code>\n` +
+            `⭐️ Baho: ${s.reviewRating || 5}/5\n\n` +
+            `📝 ${esc(text)}`,
+            { parse_mode: 'HTML' }
+        ).catch(() => {});
+
+        return ctx.reply('✅ Fikringiz saqlandi.\n\n❤️ Rahmat! Biz uchun mijozlar fikri juda muhim.');
+    }
+
+    // Complaint
+    if (s.waitingForComplaint) {
+        s.waitingForComplaint = false;
+        db.prepare(`INSERT INTO complaints (user_id, complaint_text) VALUES (?,?)`).run(userId, text);
+
+        bot.telegram.sendMessage(ADMIN_ID,
+            '🚨 <b>YANGI SHIKOYAT</b>\n\n' +
+            `👤 ${esc(ctx.from.first_name)}\n` +
+            `🔗 @${esc(ctx.from.username || 'yo‘q')}\n` +
+            `🆔 <code>${userId}</code>\n\n` +
+            `📝 ${esc(text)}`,
+            { parse_mode: 'HTML' }
+        ).catch(() => {});
+
+        return ctx.reply('✅ Shikoyatingiz adminga yuborildi.');
     }
 
     return next();
 });
 
 // ============================================================
-// HOME
+// FINISH ORDER
 // ============================================================
+async function finishOrder(ctx) {
+    const userId = ctx.from.id;
+    const s = getState(userId);
+    const user = getUser(userId);
 
-bot.action('go_home', async (ctx) => {
+    const phone = s.orderPhone || user.phone || '';
+    const service = s.pendingService || 'Umumiy murojaat';
+    const detected = s.detectedService;
+    const discount = user.has_discount ? '🎁 15% chegirma BOR' : 'Chegirma yo‘q';
 
-    await ctx.answerCbQuery().catch(() => {});
+    const result = db.prepare(`
+        INSERT INTO orders
+        (user_id, full_name, username, phone, second_phone, service, description,
+         budget, estimated_service, minimum_price, discount)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+        userId,
+        s.clientFullName || `${user.first_name} ${user.last_name || ''}`.trim(),
+        user.username || '',
+        phone,
+        user.second_phone || '',
+        service,
+        s.orderDescription || '',
+        s.clientBudget || '',
+        detected?.title || '',
+        detected?.price ? `${detected.price.toLocaleString('uz-UZ')} so‘m` : '',
+        discount
+    );
 
-    const user = getUser(ctx.from.id);
+    const adminText =
+        '🚨 <b>BILOL | WEB DEVELOPER — YANGI BUYURTMA</b>\n\n' +
+        `📦 <b>Order ID:</b> #${result.lastInsertRowid}\n\n` +
+        `👤 <b>F.I.O:</b> ${esc(s.clientFullName || '')}\n` +
+        `📞 <b>Tel:</b> ${esc(phone)}\n` +
+        `📱 <b>Qo‘shimcha tel:</b> ${esc(user.second_phone || 'Yo‘q')}\n` +
+        `🔗 <b>Username:</b> @${esc(user.username || 'mavjud_emas')}\n` +
+        `🆔 <b>Telegram ID:</b> <code>${userId}</code>\n\n` +
+        `📌 <b>Xizmat:</b> ${esc(detected?.title || service)}\n` +
+        `📝 <b>Buyurtma:</b>\n${esc(s.orderDescription || '')}\n\n` +
+        `💰 <b>Mijoz budjeti:</b> ${esc(s.clientBudget || '')}\n` +
+        `💵 <b>Minimal narx:</b> ${detected?.price ? detected.price.toLocaleString('uz-UZ') + ' so‘m' : 'Kelishiladi'}\n\n` +
+        `🏷 <b>Aksiya:</b> ${esc(discount)}\n\n` +
+        '✅ 50% oldindan to‘lov shartiga rozilik berilgan.';
+
+    await bot.telegram.sendMessage(ADMIN_ID, adminText, { parse_mode: 'HTML' }).catch(() => {});
+
+    // Reset
+    Object.assign(s, {
+        pendingService: null, clientFullName: null, orderDescription: null,
+        clientBudget: null, detectedService: null, orderPhone: null, waitingForOrderPhone: false
+    });
 
     await ctx.reply(
-        '🏠 <b>Asosiy menyu</b>',
+        '🎉 <b>Buyurtmangiz qabul qilindi!</b>\n\n' +
+        `📦 Buyurtma raqami: <b>#${result.lastInsertRowid}</b>\n\n` +
+        'Rahmat! Ma’lumotlaringiz adminga yuborildi.\n' +
+        'Mutaxassisimiz siz bilan bog‘lanadi. 🚀',
+        { parse_mode: 'HTML', ...getMainMenu(user.language || 'uz') }
+    );
+}
+
+// ============================================================
+// REVIEWS
+// ============================================================
+bot.hears(['⭐️ Mijozlar fikri', '⭐️ Отзывы клиентов', '⭐️ Client Reviews'], async ctx => {
+    if (!(await ensureAccess(ctx))) return;
+
+    await ctx.reply(
+        '⭐️ <b>MIJOZLAR FIKRI</b>\n\n' +
+        'Biz bilan ishlagan mijozlarning fikrlari.\n\n' +
+        'Siz ham baho qoldirishingiz mumkin 👇',
         {
             parse_mode: 'HTML',
-            ...mainMenu(user?.language || 'uz')
+            ...Markup.inlineKeyboard([
+                [
+                    Markup.button.callback('⭐️ 1', 'review_1'),
+                    Markup.button.callback('⭐️ 2', 'review_2'),
+                    Markup.button.callback('⭐️ 3', 'review_3')
+                ],
+                [
+                    Markup.button.callback('⭐️ 4', 'review_4'),
+                    Markup.button.callback('⭐️ 5', 'review_5')
+                ]
+            ])
         }
+    );
+});
+
+bot.action(/^review_([1-5])$/, async ctx => {
+    await ctx.answerCbQuery().catch(() => {});
+    const rating = Number(ctx.match[1]);
+    const s = getState(ctx.from.id);
+    s.reviewRating = rating;
+    s.waitingForReview = true;
+    await ctx.reply(
+        `⭐️ Siz <b>${rating}/5</b> baho berdingiz.\n\n✍️ Endi fikringizni yozib qoldiring:`,
+        { parse_mode: 'HTML' }
+    );
+});
+
+// ============================================================
+// COMPLAINT
+// ============================================================
+bot.hears(['📝 Shikoyat qoldirish', '📝 Жалоба', '📝 Complaint'], async ctx => {
+    if (!(await ensureAccess(ctx))) return;
+    getState(ctx.from.id).waitingForComplaint = true;
+    await ctx.reply(
+        '📝 <b>SHIKOYAT / TAKLIF</b>\n\n' +
+        'Muammo yoki taklifingizni batafsil yozing.\n\n' +
+        'Xabaringiz to‘g‘ridan-to‘g‘ri adminga yuboriladi.',
+        { parse_mode: 'HTML' }
+    );
+});
+
+// ============================================================
+// GAME 15% (1 marta)
+// ============================================================
+bot.hears(['🎮 15% Chegirma o‘yini', '🎮 Игра на скидку 15%', '🎮 Win 15% Discount'], async ctx => {
+    if (!(await ensureAccess(ctx))) return;
+
+    const user = getUser(ctx.from.id);
+    if (user.game_played) {
+        return ctx.reply(
+            '⚠️ Siz bu o‘yinda allaqachon qatnashgansiz.\n\n🎁 Faqat <b>1 ta imkoniyat</b> beriladi.',
+            { parse_mode: 'HTML' }
+        );
+    }
+
+    const winningBox = Math.floor(Math.random() * 3) + 1;
+    getState(ctx.from.id).winningBox = winningBox;
+
+    await ctx.reply(
+        '🎮 <b>AKSIYALI OMAD O‘YINI</b>\n\n' +
+        '📢 Kanalimizga obuna bo‘lganingiz uchun sizga <b>15% chegirma</b> yutib olish imkoniyati berildi! 🎁\n\n' +
+        '3 ta sirli qutidan birini tanlang.\n\n' +
+        '🏆 Yutuq: <b>15% chegirma</b>\n' +
+        '🔒 Imkoniyat: <b>1 marta</b>',
+        {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard([[
+                Markup.button.callback('🎁 1-Quti', 'game_1'),
+                Markup.button.callback('🎁 2-Quti', 'game_2'),
+                Markup.button.callback('🎁 3-Quti', 'game_3')
+            ]])
+        }
+    );
+});
+
+bot.action(/^game_([1-3])$/, async ctx => {
+    await ctx.answerCbQuery().catch(() => {});
+    const userId = ctx.from.id;
+    const user = getUser(userId);
+    const s = getState(userId);
+
+    if (user.game_played) return ctx.reply('⚠️ Siz allaqachon o‘ynagansiz.');
+
+    updateUser(userId, { game_played: 1 });
+    const choice = Number(ctx.match[1]);
+
+    if (choice === s.winningBox) {
+        updateUser(userId, { has_discount: 1 });
+        return ctx.reply(
+            '🎉 <b>TABRIKLAYMIZ!</b>\n\n' +
+            '🏆 Siz <b>15% CHEGIRMA</b> yutdingiz!\n\n' +
+            '🎁 Promokod:\n<code>BILOL15</code>\n\n' +
+            'Buyurtma berishda ushbu kodni ayting.',
+            { parse_mode: 'HTML' }
+        );
+    }
+
+    return ctx.reply(
+        `😢 Afsus, bu safar yutuq chiqmadi.\n\n` +
+        `Sizning tanlovingiz: ${choice}-quti.\n` +
+        `🎁 Yutuqli quti: ${s.winningBox}-quti edi.\n\n` +
+        '⚠️ O‘yin imkoniyati 1 marta edi.'
     );
 });
 
 // ============================================================
 // CONTACTS
 // ============================================================
+bot.hears(['📞 Biz bilan bog‘lanish', '📞 Контакты', '📞 Contacts'], async ctx => {
+    if (!(await ensureAccess(ctx))) return;
 
-bot.hears(
-    [
-        '📞 Biz bilan bog‘lanish',
-        '📞 Контакты',
-        '📞 Contact'
-    ],
-    async (ctx) => {
+    await ctx.reply(
+        '📞 <b>BIZ BILAN BOG‘LANISH</b>\n\n' +
+        '📢 <b>Telegram kanal:</b>\n@webuzbekistan\n\n' +
+        '📸 <b>Instagram:</b>\n@webi.uz\n\n' +
+        '💬 <b>Shaxsiy aloqa:</b>\n@sharipoov1\n\n' +
+        `📱 <b>Telefon:</b>\n${PHONE_MAIN}\n\n` +
+        '🚀 Biznesingiz uchun raqamli yechim kerak bo‘lsa, biz bilan bog‘laning.',
+        {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard([
+                [Markup.button.url('📢 Telegram kanal', CHANNEL_URL)],
+                [Markup.button.url('📸 Instagram', INSTAGRAM_URL)],
+                [Markup.button.url('💬 Telegram orqali bog‘lanish', ADMIN_USERNAME)]
+            ])
+        }
+    );
+});
 
+// ============================================================
+// ADMIN PANEL
+// ============================================================
+bot.command('admin', async ctx => {
+    if (!isAdmin(ctx)) return;
+    getState(ctx.from.id).waitingForAdminPassword = true;
+    await ctx.reply('🔐 <b>ADMIN PANEL</b>\n\nMaxfiy parolni kiriting:', { parse_mode: 'HTML' });
+});
+
+function adminKeyboard() {
+    return Markup.inlineKeyboard([
+        [Markup.button.callback('📊 Statistika', 'adm_stats')],
+        [Markup.button.callback('👥 Foydalanuvchilar', 'adm_users')],
+        [Markup.button.callback('🚨 Buyurtmalar', 'adm_orders')],
+        [Markup.button.callback('📝 Shikoyatlar', 'adm_complaints')],
+        [Markup.button.callback('⭐️ Sharhlar', 'adm_reviews')],
+        [Markup.button.callback('📢 Reklama tarqatish', 'adm_broadcast')],
+        [Markup.button.callback('📣 Kanalga post joylash', 'adm_channel_post')],
+        [Markup.button.callback('🧹 Bloklanganlarni tozalash', 'adm_clean')],
+        [Markup.button.callback('➕ Menyu boshqaruvi', 'adm_menu')]
+    ]);
+}
+
+async function showAdminPanel(ctx) {
+    await ctx.reply(
+        '🛡 <b>BILOL | WEB DEVELOPER — ADMIN CONTROL CENTER</b>\n\n' +
+        '┏ Xavfsizlik: <code>100% Protected</code>\n' +
+        '┣ Tizim: <code>Barqaror / Ishlayapti ⚡️</code>\n' +
+        '┣ Database: <code>SQLite / Persistent</code>\n' +
+        '┗ Boshqaruv: 👇',
+        { parse_mode: 'HTML', ...adminKeyboard() }
+    );
+}
+
+// ============================================================
+// ADMIN STATS
+// ============================================================
+bot.action('adm_stats', async ctx => {
+    if (!isAdmin(ctx)) return;
+    await ctx.answerCbQuery().catch(() => {});
+
+    const count = (sql) => db.prepare(sql).get().count;
+
+    const total = count(`SELECT COUNT(*) AS count FROM users`);
+    const active = count(`SELECT COUNT(*) AS count FROM users WHERE is_blocked=0`);
+    const blocked = count(`SELECT COUNT(*) AS count FROM users WHERE is_blocked=1`);
+    const orders = count(`SELECT COUNT(*) AS count FROM orders`);
+    const newOrders = count(`SELECT COUNT(*) AS count FROM orders WHERE status='new'`);
+    const complaints = count(`SELECT COUNT(*) AS count FROM complaints`);
+    const newComplaints = count(`SELECT COUNT(*) AS count FROM complaints WHERE status='new'`);
+    const reviews = count(`SELECT COUNT(*) AS count FROM reviews`);
+    const games = count(`SELECT COUNT(*) AS count FROM users WHERE game_played=1`);
+    const winners = count(`SELECT COUNT(*) AS count FROM users WHERE has_discount=1`);
+
+    await ctx.editMessageText(
+        '📊 <b>BILOL | REAL STATISTIKA</b>\n\n' +
+        '━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '👥 <b>FOYDALANUVCHILAR</b>\n\n' +
+        `👥 Jami: <code>${total}</code>\n` +
+        `🟢 Aktiv: <code>${active}</code>\n` +
+        `🚫 Bloklangan: <code>${blocked}</code>\n\n` +
+        '━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '📦 <b>BUYURTMALAR</b>\n\n' +
+        `📦 Jami: <code>${orders}</code>\n` +
+        `🆕 Yangi: <code>${newOrders}</code>\n\n` +
+        '━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '📝 <b>SHIKOYATLAR</b>\n\n' +
+        `📝 Jami: <code>${complaints}</code>\n` +
+        `🚨 Yangi: <code>${newComplaints}</code>\n\n` +
+        '━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '⭐️ <b>SHARHLAR</b>\n\n' +
+        `⭐️ Jami: <code>${reviews}</code>\n\n` +
+        '━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '🎮 <b>AKSIYA O‘YINI</b>\n\n' +
+        `🎮 O‘ynagan: <code>${games}</code>\n` +
+        `🎁 Chegirma olgan: <code>${winners}</code>\n\n` +
+        '━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '💾 Ma’lumotlar real SQLite bazadan olinmoqda.',
+        {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Admin panel', 'adm_back')]])
+        }
+    ).catch(() => {});
+});
+
+// ============================================================
+// ADMIN USERS
+// ============================================================
+bot.action('adm_users', async ctx => {
+    if (!isAdmin(ctx)) return;
+    await ctx.answerCbQuery().catch(() => {});
+
+    const users = db.prepare(`SELECT * FROM users ORDER BY last_seen DESC`).all();
+    if (!users.length) return ctx.reply('👥 Hali foydalanuvchilar yo‘q.');
+
+    await ctx.reply(`👥 <b>FOYDALANUVCHILAR — ${users.length} TA</b>\n\nQuyidagilarni boshqaring:`, { parse_mode: 'HTML' });
+
+    for (const u of users.slice(0, 50)) {
+        const status = u.is_blocked ? '🔴 BLOKLANGAN' : '🟢 FAOL';
         await ctx.reply(
-            '📬 <b>BIZ BILAN BOG‘LANISH</b>\n\n' +
-
-            `📞 <b>Telefon:</b> ${escapeHtml(getBotData('phone'))}\n\n` +
-
-            `💬 <b>Telegram:</b> ${escapeHtml(getBotData('telegram'))}\n\n` +
-
-            '📸 <b>Instagram:</b> @webi.uz\n\n' +
-
-            '📢 <b>Telegram kanal:</b> @webuzbekistan\n\n' +
-
-            '💬 <b>Buyurtma / aloqa:</b> @sharipoov1',
+            '👤 <b>FOYDALANUVCHI</b>\n\n' +
+            '━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+            `👤 <b>Ism:</b> ${esc(`${u.first_name || ''} ${u.last_name || ''}`.trim())}\n` +
+            `🔗 <b>Username:</b> @${esc(u.username || 'yo‘q')}\n` +
+            `🆔 <b>Telegram ID:</b> <code>${u.id}</code>\n` +
+            `📞 <b>Telefon:</b> ${esc(u.phone || 'Yo‘q')}\n` +
+            `📱 <b>Qo‘shimcha:</b> ${esc(u.second_phone || 'Yo‘q')}\n` +
+            `🕐 <b>Ro‘yxatdan:</b> <code>${u.registered_at}</code>\n` +
+            `🕐 <b>Oxirgi faollik:</b> <code>${u.last_seen}</code>\n` +
+            `📊 <b>Status:</b> ${status}`,
             {
                 parse_mode: 'HTML',
-                ...Markup.inlineKeyboard([
-                    [
-                        Markup.button.url(
-                            '📢 Telegram kanal',
-                            CHANNEL_URL
-                        )
-                    ],
-                    [
-                        Markup.button.url(
-                            '📸 Instagram',
-                            INSTAGRAM_URL
-                        )
-                    ],
-                    [
-                        Markup.button.url(
-                            '💬 Admin bilan bog‘lanish',
-                            ADMIN_USERNAME
-                        )
-                    ]
-                ])
+                ...Markup.inlineKeyboard([[
+                    u.is_blocked
+                        ? Markup.button.callback('🟢 Blockdan chiqarish', `unblock_${u.id}`)
+                        : Markup.button.callback('🚫 Block qilish', `block_${u.id}`)
+                ]])
             }
         );
     }
-);
+});
+
+bot.action(/^block_(\d+)$/, async ctx => {
+    if (!isAdmin(ctx)) return;
+    const id = Number(ctx.match[1]);
+    updateUser(id, { is_blocked: 1 });
+    await ctx.answerCbQuery('Bloklandi.').catch(() => {});
+    await ctx.reply(`🚫 Foydalanuvchi <code>${id}</code> bloklandi.`, { parse_mode: 'HTML' });
+});
+
+bot.action(/^unblock_(\d+)$/, async ctx => {
+    if (!isAdmin(ctx)) return;
+    const id = Number(ctx.match[1]);
+    updateUser(id, { is_blocked: 0 });
+    await ctx.answerCbQuery('Blokdan chiqarildi.').catch(() => {});
+    await ctx.reply(`🟢 Foydalanuvchi <code>${id}</code> blokdan chiqarildi.`, { parse_mode: 'HTML' });
+});
 
 // ============================================================
-// REVIEWS
+// ADMIN ORDERS
 // ============================================================
+bot.action('adm_orders', async ctx => {
+    if (!isAdmin(ctx)) return;
+    await ctx.answerCbQuery().catch(() => {});
+    const orders = db.prepare(`SELECT * FROM orders ORDER BY id DESC LIMIT 20`).all();
+    if (!orders.length) return ctx.reply('📦 Hali buyurtmalar mavjud emas.');
 
-bot.hears(
-    [
-        '⭐️ Mijozlar fikri',
-        '⭐️ Отзывы',
-        '⭐️ Reviews'
-    ],
-    async (ctx) => {
-
+    for (const o of orders) {
         await ctx.reply(
-            '⭐️ <b>MIJOZLAR FIKRI</b>\n\n' +
-            'Bizning xizmatimizni baholang 👇\n\n' +
-            '1 dan 5 gacha yulduz tanlang:',
-            {
-                parse_mode: 'HTML',
-                ...Markup.inlineKeyboard([
-                    [
-                        Markup.button.callback('⭐ 1', 'rate_1'),
-                        Markup.button.callback('⭐ 2', 'rate_2'),
-                        Markup.button.callback('⭐ 3', 'rate_3'),
-                        Markup.button.callback('⭐ 4', 'rate_4'),
-                        Markup.button.callback('⭐ 5', 'rate_5')
-                    ],
-                    [
-                        Markup.button.callback(
-                            '✍️ Fikr yozish',
-                            'leave_review'
-                        )
-                    ],
-                    [
-                        Markup.button.callback(
-                            '🚨 Shikoyat yozish',
-                            'leave_complaint'
-                        )
-                    ]
-                ])
-            }
+            `📦 <b>BUYURTMA #${o.id}</b>\n\n` +
+            `👤 ${esc(o.full_name || '')}\n` +
+            `📞 ${esc(o.phone || '')}\n` +
+            `🔗 @${esc(o.username || 'yo‘q')}\n` +
+            `📌 ${esc(o.estimated_service || o.service || '')}\n` +
+            `💰 ${esc(o.budget || '')}\n` +
+            `📊 Status: ${esc(o.status)}\n` +
+            `🕐 ${o.created_at}`,
+            { parse_mode: 'HTML' }
         );
     }
-);
+});
 
-bot.action(/^rate_([1-5])$/, async (ctx) => {
+// ============================================================
+// ADMIN COMPLAINTS
+// ============================================================
+bot.action('adm_complaints', async ctx => {
+    if (!isAdmin(ctx)) return;
+    await ctx.answerCbQuery().catch(() => {});
+    const list = db.prepare(`SELECT * FROM complaints ORDER BY id DESC LIMIT 20`).all();
+    if (!list.length) return ctx.reply('📝 Hali shikoyatlar yo‘q.');
 
-    const rating = Number(ctx.match[1]);
+    for (const c of list) {
+        await ctx.reply(
+            `🚨 <b>SHIKOYAT #${c.id}</b>\n\n` +
+            `👤 User ID: <code>${c.user_id}</code>\n` +
+            `📊 Status: ${esc(c.status)}\n\n` +
+            `📝 ${esc(c.complaint_text)}\n\n` +
+            `🕐 ${c.created_at}`,
+            { parse_mode: 'HTML' }
+        );
+    }
+});
 
-    db.prepare(`
-        INSERT INTO reviews (
-            user_id,
-            rating,
-            text
-        )
-        VALUES (?, ?, '')
-    `).run(ctx.from.id, rating);
+// ============================================================
+// ADMIN REVIEWS
+// ============================================================
+bot.action('adm_reviews', async ctx => {
+    if (!isAdmin(ctx)) return;
+    await ctx.answerCbQuery().catch(() => {});
+    const list = db.prepare(`SELECT * FROM reviews ORDER BY id DESC LIMIT 20`).all();
+    if (!list.length) return ctx.reply('⭐️ Hali sharhlar yo‘q.');
 
-    await ctx.answerCbQuery(
-        `${rating} yulduz qabul qilindi!`
-    );
+    for (const r of list) {
+        await ctx.reply(
+            `⭐️ <b>SHARH #${r.id}</b>\n\n` +
+            `👤 User: <code>${r.user_id}</code>\n` +
+            `⭐️ Baho: ${r.rating}/5\n\n` +
+            `📝 ${esc(r.review_text)}\n\n` +
+            `🕐 ${r.created_at}`,
+            { parse_mode: 'HTML' }
+        );
+    }
+});
 
-    updateUser(ctx.from.id, {
-        state: 'waiting_review'
-    });
+// ============================================================
+// ADMIN BROADCAST
+// ============================================================
+bot.action('adm_broadcast', async ctx => {
+    if (!isAdmin(ctx)) return;
+    await ctx.answerCbQuery().catch(() => {});
+    getState(ctx.from.id).waitingForBroadcast = true;
 
     await ctx.reply(
-        `❤️ <b>Rahmat!</b> Siz botimizga <b>${rating} ta yulduz</b> baho berdingiz.\n\n` +
-        'Agar xohlasangiz, fikringizni ham yozib qoldiring 👇',
+        '📢 <b>UNIVERSAL REKLAMA TARQATISH</b>\n\n' +
+        'Endi reklama xabarini yuboring.\n\n' +
+        '📝 Oddiy matn\n🖼 Rasm + caption\n📹 Video\n📄 Document\n🎵 Audio\n🎬 GIF\n\n' +
+        'Xabar botdan foydalanayotgan barcha foydalanuvchilarga yuboriladi.\n\n' +
+        '⚠️ Bloklaganlarga yetib bormaydi.',
         { parse_mode: 'HTML' }
     );
 });
 
-bot.action('leave_review', async (ctx) => {
+async function processBroadcast(ctx) {
+    const s = getState(ctx.from.id);
+    s.waitingForBroadcast = false;
 
-    await ctx.answerCbQuery().catch(() => {});
+    const users = db.prepare(`SELECT id FROM users WHERE is_blocked=0`).all();
+    await ctx.reply(`⏳ Reklama ${users.length} ta foydalanuvchiga yuborilmoqda...`);
 
-    updateUser(ctx.from.id, {
-        state: 'waiting_review'
-    });
+    let success = 0, failed = 0;
+    for (const u of users) {
+        try {
+            await ctx.telegram.copyMessage(u.id, ctx.chat.id, ctx.message.message_id);
+            success++;
+        } catch (e) {
+            failed++;
+            const d = e.description || '';
+            if (d.includes('blocked') || d.includes('chat not found') || d.includes('deactivated')) {
+                updateUser(u.id, { is_blocked: 1 });
+            }
+        }
+    }
+
+    const type = ctx.message.photo ? 'photo' : ctx.message.video ? 'video'
+        : ctx.message.document ? 'document' : ctx.message.audio ? 'audio'
+        : ctx.message.animation ? 'animation' : 'text';
+
+    db.prepare(`INSERT INTO broadcasts (message_type,success_count,fail_count) VALUES (?,?,?)`)
+      .run(type, success, failed);
 
     await ctx.reply(
-        '✍️ <b>Fikringizni yozib yuboring:</b>\n\n' +
-        'Fikringiz adminga yuboriladi.',
+        '✅ <b>REKLAMA TARQATISH YAKUNLANDI</b>\n\n' +
+        `📤 Yetib bordi: <code>${success}</code>\n` +
+        `⚠️ Yetib bormadi: <code>${failed}</code>`,
+        { parse_mode: 'HTML' }
+    );
+}
+
+// ============================================================
+// ADMIN CHANNEL POST
+// ============================================================
+bot.action('adm_channel_post', async ctx => {
+    if (!isAdmin(ctx)) return;
+    await ctx.answerCbQuery().catch(() => {});
+    getState(ctx.from.id).waitingForChannelPost = true;
+
+    await ctx.reply(
+        '📣 <b>KANALGA POST JOYLASH</b>\n\n' +
+        `Endi postni yuboring. U to‘g‘ridan-to‘g‘ri <b>${esc(TARGET_CHANNEL)}</b> kanaliga joylanadi.\n\n` +
+        '📝 Matn\n🖼 Rasm + caption\n📹 Video\n📄 Document\n🎬 GIF\n\n' +
+        '⚠️ Bot kanalda <b>admin</b> bo‘lishi kerak!',
         { parse_mode: 'HTML' }
     );
 });
 
-bot.action('leave_complaint', async (ctx) => {
+async function processChannelPost(ctx) {
+    const s = getState(ctx.from.id);
+    s.waitingForChannelPost = false;
 
+    try {
+        await ctx.telegram.copyMessage(TARGET_CHANNEL, ctx.chat.id, ctx.message.message_id);
+        await ctx.reply(
+            `✅ Post muvaffaqiyatli <b>${esc(TARGET_CHANNEL)}</b> kanaliga joylandi!`,
+            { parse_mode: 'HTML' }
+        );
+    } catch (e) {
+        console.error('CHANNEL POST ERROR:', e.message);
+        await ctx.reply(
+            '❌ Kanalga joylashda xatolik!\n\n' +
+            'Sabablari:\n' +
+            '• Bot kanalda admin emas\n' +
+            '• Kanal username noto‘g‘ri\n' +
+            '• Bot huquqlari yetarli emas\n\n' +
+            `Xatolik: <code>${esc(e.description || e.message)}</code>`,
+            { parse_mode: 'HTML' }
+        );
+    }
+}
+
+// ============================================================
+// CLEAN BLOCKED
+// ============================================================
+bot.action('adm_clean', async ctx => {
+    if (!isAdmin(ctx)) return;
     await ctx.answerCbQuery().catch(() => {});
 
-    updateUser(ctx.from.id, {
-        state: 'waiting_complaint'
-    });
+    const users = db.prepare(`SELECT id FROM users WHERE is_blocked=0`).all();
+    let active = 0, removed = 0;
+    await ctx.reply('⏳ Foydalanuvchilar tekshirilmoqda...');
+
+    for (const u of users) {
+        try {
+            await ctx.telegram.sendChatAction(u.id, 'typing');
+            active++;
+        } catch (e) {
+            removed++;
+            updateUser(u.id, { is_blocked: 1 });
+        }
+    }
 
     await ctx.reply(
-        '🚨 <b>Shikoyat / murojaat</b>\n\n' +
-        'Muammoingizni batafsil yozib yuboring.\n' +
-        'Murojaatingiz adminga yuboriladi.',
+        '🧹 <b>TOZALASH YAKUNLANDI</b>\n\n' +
+        `🟢 Faol: <code>${active}</code>\n` +
+        `🔴 Bloklangan: <code>${removed}</code>`,
         { parse_mode: 'HTML' }
     );
 });
 
 // ============================================================
-// REVIEW / COMPLAINT TEXT
+// ADMIN MENU MANAGEMENT
 // ============================================================
+bot.action('adm_menu', async ctx => {
+    if (!isAdmin(ctx)) return;
+    await ctx.answerCbQuery().catch(() => {});
+
+    await ctx.reply(
+        '➕ <b>MENYU BOSHQARUVI</b>\n\nBot menyusini shu yerdan boshqarish mumkin.',
+        {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard([
+                [Markup.button.callback('📋 Menyuni ko‘rish', 'menu_list')],
+                [Markup.button.callback('➕ Yangi menyu qo‘shish', 'menu_add')],
+                [Markup.button.callback('🔄 Menyuni yangilash', 'menu_refresh')]
+            ])
+        }
+    );
+});
+
+bot.action('menu_list', async ctx => {
+    if (!isAdmin(ctx)) return;
+    await ctx.answerCbQuery().catch(() => {});
+    const menus = db.prepare(`SELECT * FROM menu_items ORDER BY sort_order`).all();
+    let text = '📋 <b>BOT MENYUSI</b>\n\n';
+    for (const m of menus) {
+        text += `#${m.id}  ${m.active ? '🟢' : '🔴'} ${esc(m.title_uz)}\n` +
+                `Action: <code>${esc(m.action)}</code>\n\n`;
+    }
+    await ctx.reply(text, { parse_mode: 'HTML' });
+});
+
+bot.action('menu_refresh', async ctx => {
+    if (!isAdmin(ctx)) return;
+    await ctx.answerCbQuery().catch(() => {});
+    await ctx.reply('🔄 Menyu ma’lumotlari bazadan qayta o‘qiladi. Yangi menyuni ko‘rish uchun asosiy menyuga qayting.');
+});
+
+bot.action('menu_add', async ctx => {
+    if (!isAdmin(ctx)) return;
+    await ctx.answerCbQuery().catch(() => {});
+    getState(ctx.from.id).waitingForMenuTitle = true;
+    await ctx.reply(
+        '➕ <b>YANGI MENYU</b>\n\nHozircha UZ nomini yuboring.\n\nMasalan:\n<code>💎 Maxsus takliflar</code>',
+        { parse_mode: 'HTML' }
+    );
+});
 
 bot.on('text', async (ctx, next) => {
+    if (!isAdmin(ctx)) return next();
+    const s = getState(ctx.from.id);
 
-    if (isAdmin(ctx)) return next();
-
-    const user = getUser(ctx.from.id);
-
-    if (!user) return next();
-
-    const text = ctx.message.text.trim();
-
-    // REVIEW
-    if (user.state === 'waiting_review') {
-
-        db.prepare(`
-            UPDATE reviews
-            SET text = ?
-            WHERE id = (
-                SELECT id
-                FROM reviews
-                WHERE user_id = ?
-                ORDER BY id DESC
-                LIMIT 1
-            )
-        `).run(text, ctx.from.id);
-
-        updateUser(ctx.from.id, {
-            state: ''
-        });
-
-        await ctx.telegram.sendMessage(
-            ADMIN_ID,
-            '⭐ <b>YANGI MIJOZ FIKRI</b>\n\n' +
-            `👤 ${escapeHtml(
-                `${user.first_name || ''} ${user.last_name || ''}`.trim()
-            )}\n` +
-            `🔗 ${user.username ? '@' + escapeHtml(user.username) : 'Username yo‘q'}\n` +
-            `🆔 ${user.id}\n` +
-            `⭐ Bahosi: ${escapeHtml(
-                String(
-                    db.prepare(`
-                        SELECT rating
-                        FROM reviews
-                        WHERE user_id = ?
-                        ORDER BY id DESC
-                        LIMIT 1
-                    `).get(ctx.from.id)?.rating || 0
-                )
-            )}\n` +
-            `📝 Fikr: ${escapeHtml(text)}`,
+    if (s.waitingForMenuTitle) {
+        s.newMenuTitleUz = ctx.message.text.trim();
+        s.waitingForMenuTitle = false;
+        s.waitingForMenuAction = true;
+        return ctx.reply(
+            '✅ UZ nomi qabul qilindi.\n\nEndi action nomini yuboring.\n\nMasalan:\n<code>special_offer</code>',
             { parse_mode: 'HTML' }
-        ).catch(() => {});
-
-        await ctx.reply(
-            '❤️ <b>Rahmat!</b>\n\n' +
-            'Fikringiz adminga yuborildi.',
-            {
-                parse_mode: 'HTML',
-                ...mainMenu(user.language || 'uz')
-            }
         );
-
-        return;
     }
 
-    // COMPLAINT
-    if (user.state === 'waiting_complaint') {
-
-        const complaintId = db.prepare(`
-            INSERT INTO complaints (
-                user_id,
-                text,
-                status
-            )
-            VALUES (?, ?, 'new')
-        `).run(
-            ctx.from.id,
-            text
-        ).lastInsertRowid;
-
-        updateUser(ctx.from.id, {
-            state: ''
-        });
-
-        await ctx.telegram.sendMessage(
-            ADMIN_ID,
-            '🚨 <b>YANGI SHIKOYAT</b>\n\n' +
-            `🆔 Shikoyat #${complaintId}\n` +
-            `👤 ${escapeHtml(
-                `${user.first_name || ''} ${user.last_name || ''}`.trim()
-            )}\n` +
-            `🔗 ${user.username ? '@' + escapeHtml(user.username) : 'Username yo‘q'}\n` +
-            `🆔 Telegram ID: ${user.id}\n\n` +
-            `📝 <b>Shikoyat:</b>\n${escapeHtml(text)}`,
+    if (s.waitingForMenuAction) {
+        s.newMenuAction = ctx.message.text.trim();
+        db.prepare(`INSERT INTO menu_items (title_uz,title_ru,title_en,action,sort_order) VALUES (?,?,?,?,?)`)
+          .run(s.newMenuTitleUz, s.newMenuTitleUz, s.newMenuTitleUz, s.newMenuAction, 99);
+        s.waitingForMenuAction = false;
+        return ctx.reply(
+            '✅ <b>Yangi menyu qo‘shildi!</b>\n\n' +
+            `🔘 ${esc(s.newMenuTitleUz)}\n` +
+            `⚙️ Action: <code>${esc(s.newMenuAction)}</code>\n\n` +
+            '⚠️ Maxsus action uchun bot kodiga handler qo‘shish kerak.',
             { parse_mode: 'HTML' }
-        ).catch(() => {});
-
-        await ctx.reply(
-            '✅ <b>Shikoyatingiz qabul qilindi.</b>\n\n' +
-            'Admin ko‘rib chiqadi.',
-            {
-                parse_mode: 'HTML',
-                ...mainMenu(user.language || 'uz')
-            }
         );
-
-        return;
     }
 
     return next();
 });
 
-// ============================================================
-// DISCOUNT GAME
-// ============================================================
-
-bot.hears(
-    [
-        '🎮 15% Chegirma o‘yini',
-        '🎮 Выиграть 15% скидку',
-        '🎮 Win 15% Discount'
-    ],
-    async (ctx) => {
-
-        const user = getUser(ctx.from.id);
-
-        if (user.has_played) {
-
-            await ctx.reply(
-                '⚠️ <b>Siz bu o‘yinda allaqachon qatnashgansiz.</b>\n\n' +
-                'Imkoniyat faqat 1 marta beriladi.',
-                { parse_mode: 'HTML' }
-            );
-
-            return;
-        }
-
-        const winningBox =
-            Math.floor(Math.random() * 3) + 1;
-
-        updateUser(ctx.from.id, {
-            has_played: 0,
-            state: `game_${winningBox}`
-        });
-
-        await ctx.reply(
-            '🎮 <b>15% CHEGIRMA O‘YINI</b>\n\n' +
-
-            '📢 Kanalimizga obuna bo‘lganingiz uchun sizga ' +
-            '<b>1 martalik aksiya</b> berildi.\n\n' +
-
-            '🎁 3 ta sirli qutidan bittasida <b>15% chegirma</b> bor.\n\n' +
-
-            'Omadingizni sinab ko‘ring 👇',
-            {
-                parse_mode: 'HTML',
-                ...Markup.inlineKeyboard([
-                    [
-                        Markup.button.callback(
-                            '🎁 1-QUTI',
-                            'box_1'
-                        ),
-                        Markup.button.callback(
-                            '🎁 2-QUTI',
-                            'box_2'
-                        ),
-                        Markup.button.callback(
-                            '🎁 3-QUTI',
-                            'box_3'
-                        )
-                    ]
-                ])
-            }
-        );
-    }
-);
-
-bot.action(/^box_([1-3])$/, async (ctx) => {
-
-    const user = getUser(ctx.from.id);
-
-    if (!user) return;
-
-    if (user.has_played) {
-
-        await ctx.answerCbQuery(
-            'Siz allaqachon o‘ynagansiz.',
-            { show_alert: true }
-        );
-
-        return;
-    }
-
-    const choice = Number(ctx.match[1]);
-
-    if (!user.state.startsWith('game_')) {
-
-        await ctx.answerCbQuery(
-            'Avval o‘yinni boshlang.',
-            { show_alert: true }
-        );
-
-        return;
-    }
-
-    const winningBox =
-        Number(user.state.replace('game_', ''));
-
-    updateUser(ctx.from.id, {
-        has_played: 1,
-        state: ''
-    });
-
-    await ctx.answerCbQuery('Tanlov qabul qilindi!');
-
-    if (choice === winningBox) {
-
-        updateUser(ctx.from.id, {
-            has_discount: 1,
-            promo_code: 'BILOL15-2026'
-        });
-
-        await ctx.reply(
-            '🎉 <b>TABRIKLAYMIZ!</b> 🏆\n\n' +
-            'Siz <b>15% CHEGIRMA</b> yutdingiz!\n\n' +
-            '🎁 Promokod:\n' +
-            '<code>BILOL15-2026</code>\n\n' +
-            'Buyurtma berishda ushbu promokodni ayting.\n\n' +
-            '⚠️ Chegirma faqat <b>1 marta</b> ishlatiladi.',
-            { parse_mode: 'HTML' }
-        );
-
-    } else {
-
-        await ctx.reply(
-            '😔 <b>Afsus!</b>\n\n' +
-            'Bu safar quti bo‘sh chiqdi.\n\n' +
-            '⚠️ O‘yin imkoniyati faqat 1 marta beriladi.',
-            { parse_mode: 'HTML' }
-        );
-    }
+bot.action('adm_back', async ctx => {
+    if (!isAdmin(ctx)) return;
+    await ctx.answerCbQuery().catch(() => {});
+    await showAdminPanel(ctx);
 });
 
 // ============================================================
-// BACK BUTTON
+// CANCEL
 // ============================================================
-
-bot.hears(
-    ['🔙 Ortga', '🔙 Orqaga'],
-    async (ctx) => {
-
-        const user = getUser(ctx.from.id);
-
-        updateUser(ctx.from.id, {
-            state: '',
-            pending_service: '',
-            client_full_name: '',
-            order_description: '',
-            detected_service: '',
-            min_price: 0,
-            client_budget: ''
-        });
-
-        await ctx.reply(
-            '🏠 <b>Asosiy menyu</b>',
-            {
-                parse_mode: 'HTML',
-                ...mainMenu(user?.language || 'uz')
-            }
-        );
-    }
-);
-
-// ============================================================
-// ERROR HANDLER
-// ============================================================
-
-bot.catch((error, ctx) => {
-
-    console.log(
-        'BOT ERROR:',
-        error?.message || error
-    );
-
-    if (ctx?.from?.id) {
-
-        ctx.reply(
-            '⚠️ Texnik xatolik yuz berdi.\n\n' +
-            'Iltimos, birozdan keyin qayta urinib ko‘ring.'
-        ).catch(() => {});
-    }
+bot.command('cancel', async ctx => {
+    resetTempState(ctx.from.id);
+    const u = getUser(ctx.from.id);
+    await ctx.reply('❌ Jarayon bekor qilindi.', getMainMenu(u?.language || 'uz'));
 });
 
 // ============================================================
 // LAUNCH
 // ============================================================
+bot.launch({ dropPendingUpdates: true })
+    .then(() => {
+        console.log('');
+        console.log('==============================================');
+        console.log('🔥 BILOL | WEB DEVELOPER BOT');
+        console.log('==============================================');
+        console.log('✅ Bot muvaffaqiyatli ishga tushdi');
+        console.log('💾 SQLite database: bilol_bot.db');
+        console.log('📢 Channel:', TARGET_CHANNEL);
+        console.log('👑 Admin:', ADMIN_ID);
+        console.log('🚀 Status: ONLINE');
+        console.log('==============================================');
+    })
+    .catch(err => console.error('❌ BOT LAUNCH ERROR:', err));
 
-bot.launch({
-    dropPendingUpdates: true
-}).then(() => {
-
-    console.log('');
-    console.log('==========================================');
-    console.log('🔥 BILOL | WEB DEVELOPER BOT');
-    console.log('✅ BOT ISHLAYAPTI');
-    console.log('💾 SQLite DATABASE ISHLAYAPTI');
-    console.log('📢 SUBSCRIPTION CHECK YOQILGAN');
-    console.log('📸 INSTAGRAM CONFIRMATION YOQILGAN');
-    console.log('📱 PHONE VERIFICATION YOQILGAN');
-    console.log('👥 USER MANAGEMENT YOQILGAN');
-    console.log('🚫 BLOCK / UNBLOCK YOQILGAN');
-    console.log('📢 BROADCAST YOQILGAN');
-    console.log('🎮 15% GAME YOQILGAN');
-    console.log('⭐ REVIEWS YOQILGAN');
-    console.log('🚨 COMPLAINTS YOQILGAN');
-    console.log('==========================================');
-    console.log('');
-
-}).catch(err => {
-
-    console.error(
-        '❌ BOTNI ISHGA TUSHIRISHDA XATO:',
-        err.message
-    );
-});
-
-process.once('SIGINT', () => {
-    bot.stop('SIGINT');
-    db.close();
-});
-
-process.once('SIGTERM', () => {
-    bot.stop('SIGTERM');
-    db.close();
-});
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
