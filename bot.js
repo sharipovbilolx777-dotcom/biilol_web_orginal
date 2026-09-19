@@ -1,914 +1,696 @@
-const { Markup } = require('telegraf');
-const {
-  getLanguageKeyboard,
-  getMainMenu,
-  getAdminPanelKeyboard,
-  getAgreementKeyboard,
-  getServicesKeyboard,
-  getPortfolioKeyboard,
-  getContactsKeyboard,
-  getRatingKeyboard,
-  getGameKeyboard,
-  getBackKeyboard,
-} = require('./keyboards');
-const {
-  getUser,
-  createOrUpdateUser,
-  setUserLanguage,
-  setUserPhone,
-  setUserPlayed,
-  setUserDiscount,
-  getAllUsers,
-  countUsers,
-  countBlockedUsers,
-  countPlayedUsers,
-  countDiscountUsers,
-  createOrder,
-  getOrders,
-  countOrders,
-  countOrdersByStatus,
-  updateOrderStatus,
-  createReview,
-  getReviews,
-  countReviews,
-  getActiveUsersCount,
-} = require('./database');
-const {
-  isAdmin,
-  getState,
-  clearState,
-  setState,
-  getStateValue,
-  formatPhone,
-  escapeMarkdown,
-  logError,
-  checkAndMarkBlockedUsers,
-} = require('./helpers');
+'use strict';
 
-const ADMIN_ID = process.env.ADMIN_ID;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-const TARGET_CHANNEL = process.env.TARGET_CHANNEL;
+const { Telegraf, Markup } = require('telegraf');
+const BOT_TOKEN = "8774770545:AAGQR4qQiWWf5AC-5OYvVhzHWkju9udZUgw";
+const ADMIN_ID = "867717817";
+const ADMIN_PASSWORD = "7777";
+const TARGET_CHANNEL = "@webuzbekistan";
 
-// ===================== START / TIL =====================
+const bot = new Telegraf(BOT_TOKEN);
+const userState = {};
+const allUsers = new Set();
+const startTime = Date.now();
 
-function startHandler(ctx) {
-  const user = ctx.from;
-  const telegramId = user.id.toString();
-
-  // DB ga qo‘shish yoki yangilash
-  createOrUpdateUser(telegramId, user.first_name, user.last_name, user.username, 'uz');
-
-  // State tozalash
-  clearState(telegramId);
-
-  // Admin uchun maxsus salom
-  if (isAdmin(telegramId, ADMIN_ID)) {
-    ctx.reply(
-      '👑 *Xush kelibsiz, Boss!*\nAdmin panelga kirish uchun /admin buyrugʻini yuboring.',
-      { parse_mode: 'Markdown' }
-    );
-  }
-
-  ctx.reply(
-    '━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-    '💻 *BILOL | WEB DEVELOPER*\n' +
-    '━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
-    '🚀 Biznesingizni raqamlashtirish uchun professional jamoa xizmatda.\n\n' +
-    '🎁 *Maxsus aksiya:* Mini-oʻyinda qatnashing va 20% chegirma yutib oling!\n\n' +
-    '🌐 *Muloqot tilini tanlang:*',
-    {
-      parse_mode: 'Markdown',
-      ...getLanguageKeyboard(),
+bot.use((ctx, next) => {
+    if (ctx.from) {
+        allUsers.add(ctx.from.id);
     }
-  );
-}
+    return next();
+});
 
-// ===================== TIL O‘ZGARTIRISH =====================
+const getLangMenu = () => Markup.inlineKeyboard([
+    [
+        Markup.button.callback('🇺🇿 O\'zbekcha', 'lang_uz'),
+        Markup.button.callback('🇷🇺 Русский', 'lang_ru'),
+        Markup.button.callback('🇬🇧 English', 'lang_en')
+    ]
+]);
 
-function languageCallback(ctx) {
-  const lang = ctx.match[1];
-  const telegramId = ctx.from.id.toString();
-
-  setUserLanguage(telegramId, lang);
-  setState(telegramId, 'lang', lang);
-
-  const messages = {
-    uz: '🇺🇿 Oʻzbek tili faollashdi.',
-    ru: '🇷🇺 Русский язык активирован.',
-    en: '🇬🇧 English selected.',
-  };
-
-  ctx.answerCbQuery();
-  ctx.reply(messages[lang] || messages.uz, getMainMenu(lang));
-}
-
-// ===================== ASOSIY MENYU HEAR =====================
-
-function mainMenuHandler(ctx) {
-  const text = ctx.message.text;
-  const telegramId = ctx.from.id.toString();
-  const user = getUser(telegramId);
-  const lang = user?.language || 'uz';
-
-  // Tilni o‘zgartirish
-  if (text.match(/🌐 Tilni o'zgartirish|🌐 Изменить язык|🌐 Change Language/)) {
-    ctx.reply('🌐 Tilni tanlang:', getLanguageKeyboard());
-    return;
-  }
-
-  // Portfolio
-  if (text.match(/💻 Portfolio|💻 Портфолио|💻 Bizning ishlar \(Portfolio\)/)) {
-    ctx.reply(
-      '💻 *Bilol | Web Developer — Eng soʻnggi loyihalar:*\n\nOʻzingizga yoqqan namunani koʻring 👇',
-      { parse_mode: 'Markdown', ...getPortfolioKeyboard() }
-    );
-    return;
-  }
-
-  // Xizmatlar
-  if (text.match(/⚙️ Xizmatlar va narxlar|⚙️ Услуги и цены|⚙️ Services & Pricing/)) {
-    ctx.reply(
-      '🛠 *Professional xizmatlarimiz:*\n\n' +
-      '💡 Narxlar loyiha murakkabligiga qarab kelishiladi.\n' +
-      '📌 Barcha loyihalar uchun *50% oldindan toʻlov*.\n\n' +
-      'Quyidagi yoʻnalishlardan birini tanlang:',
-      { parse_mode: 'Markdown', ...getServicesKeyboard() }
-    );
-    return;
-  }
-
-  // Chegirma o‘yini
-  if (text.match(/🎮 20% chegirma yutish|🎮 Выиграть скидку 20%|🎮 Win 20% Discount/)) {
-    gameHandler(ctx);
-    return;
-  }
-
-  // Mijozlar fikri
-  if (text.match(/⭐️ Mijozlar fikri|⭐️ Отзывы клиентов|⭐️ Client Reviews/)) {
-    ctx.reply(
-      '⭐️ *Mijozlarimiz Bilol | Web Developer haqida:*\n\n' +
-      '👤 *Javohir (Startup asoschisi):*\n_“Veb-sayt oʻylaganimdan ham tez va professional chiqdi!”_\n\n' +
-      '👤 *Dilshod (Doʻkon egasi):*\n_“Onlayn doʻkonimiz ishga tushgach, savdolar keskin oshdi. Rahmat!”_\n\n' +
-      '👇 *Oʻz fikringizni qoldiring:*',
-      { parse_mode: 'Markdown', ...getRatingKeyboard() }
-    );
-    return;
-  }
-
-  // Loyihaga buyurtma
-  if (text.match(/📦 Loyihaga buyurtma|📦 Заказать проект|📦 Order Project/)) {
-    setState(telegramId, 'pendingService', 'Umumiy murojaat');
-    askAgreement(ctx);
-    return;
-  }
-
-  // Aloqa
-  if (text.match(/📞 Aloqa|📞 Контакты|📞 Contacts/)) {
-    ctx.reply(
-      '📬 *Bilol | Web Developer — Bogʻlanish:*\n\n' +
-      '📞 *Telefon:* `+998 99 321 21 22`\n' +
-      '💬 *Telegram:* @sharipoov1\n' +
-      '📸 *Instagram:* [boburivlc__7](https://instagram.com/boburivlc__7)\n' +
-      '📢 *Kanal:* [Bilol Web Developer](https://t.me/Bilolwebdeveloper)',
-      { parse_mode: 'Markdown', ...getContactsKeyboard(), disable_web_page_preview: true }
-    );
-    return;
-  }
-
-  // Ortga
-  if (text === '🔙 Ortga') {
-    clearState(telegramId);
-    ctx.reply('Asosiy menyu:', getMainMenu(lang));
-    return;
-  }
-
-  // Agar hech narsa mos kelmasa, asosiy menyu
-  ctx.reply('Iltimos, menyudan birini tanlang:', getMainMenu(lang));
-}
-
-// ===================== XIZMATLAR =====================
-
-function serviceCallback(ctx) {
-  const type = ctx.match[1];
-  const telegramId = ctx.from.id.toString();
-
-  const services = {
-    landing: {
-      name: 'Landing Page',
-      duration: '2–4 kun',
-      price: '500 000 so‘m ($40)',
-      prepayment: '250 000 so‘m',
-    },
-    shop: {
-      name: 'E-Commerce',
-      duration: '7–10 kun',
-      price: '1 200 000 so‘m ($100)',
-      prepayment: '600 000 so‘m',
-    },
-    corporate: {
-      name: 'Korporativ veb-sayt',
-      duration: '3–5 kun',
-      price: '800 000 so‘m ($65)',
-      prepayment: '400 000 so‘m',
-    },
-    bot: {
-      name: 'Telegram Bot',
-      duration: '2–5 kun',
-      price: '400 000 so‘m ($30)',
-      prepayment: '200 000 so‘m',
-    },
-    webapp: {
-      name: 'Veb-Ilova',
-      duration: '10–15 kun',
-      price: '2 000 000 so‘m ($160)',
-      prepayment: '1 000 000 so‘m',
-    },
-  };
-
-  const s = services[type];
-  if (!s) return ctx.answerCbQuery('Xizmat topilmadi.');
-
-  ctx.answerCbQuery();
-
-  const info =
-    `🚀 *${s.name}*\n\n` +
-    `⏳ Muddat: ${s.duration}\n` +
-    `💰 Narx: ${s.price}\n` +
-    `💳 Oldindan toʻlov (50%): ${s.prepayment}\n\n` +
-    `🤝 Narx yana kelishiladi!`;
-
-  setState(telegramId, 'pendingService', s.name);
-
-  ctx.reply(info, {
-    parse_mode: 'Markdown',
-    ...Markup.inlineKeyboard([
-      [Markup.button.callback('✨ Shu xizmatga buyurtma berish', `order_${type}`)],
-    ]),
-  });
-}
-
-// ===================== BUYURTMA JARAYONI =====================
-
-function askAgreement(ctx) {
-  ctx.reply(
-    '🤝 *Buyurtma shartlari:*\n\n' +
-    'Barcha loyihalar uchun *50% oldindan toʻlov* amalga oshiriladi.\n' +
-    'Qolgan summa loyiha tafsilotlari va murakkabligiga qarab kelishiladi.\n\n' +
-    'Rozimisiz?',
-    { parse_mode: 'Markdown', ...getAgreementKeyboard() }
-  );
-}
-
-function agreementCallback(ctx) {
-  const answer = ctx.match[1];
-  const telegramId = ctx.from.id.toString();
-
-  ctx.answerCbQuery();
-
-  if (answer === 'no') {
-    ctx.editMessageText('❌ Buyurtma bekor qilindi.', { parse_mode: 'Markdown' });
-    clearState(telegramId);
-    const user = getUser(telegramId);
-    ctx.reply('Asosiy menyu:', getMainMenu(user?.language || 'uz'));
-    return;
-  }
-
-  // Yes
-  ctx.editMessageText(
-    '✅ Rozilik qabul qilindi. Ajoyib tanlov! 🚀\n\n' +
-    '📝 Iltimos, ism va familiyangizni toʻliq kiriting (Masalan: Alisherbek Usmonov):',
-    { parse_mode: 'Markdown' }
-  );
-  setState(telegramId, 'waitingForName', true);
-}
-
-function orderCallback(ctx) {
-  const type = ctx.match[1];
-  const telegramId = ctx.from.id.toString();
-
-  ctx.answerCbQuery();
-
-  const services = {
-    landing: 'Landing Page',
-    shop: 'E-Commerce',
-    corporate: 'Korporativ veb-sayt',
-    bot: 'Telegram Bot',
-    webapp: 'Veb-Ilova',
-  };
-
-  setState(telegramId, 'pendingService', services[type] || type);
-  askAgreement(ctx);
-}
-
-// ===================== MATN QABUL QILISH (FLOW) =====================
-
-async function textHandler(ctx, next) {
-  const telegramId = ctx.from.id.toString();
-  const user = getUser(telegramId);
-  const lang = user?.language || 'uz';
-  const state = getState(telegramId);
-  const text = ctx.message.text?.trim() || '';
-
-  // 1. Ism kutilmoqda
-  if (state.waitingForName) {
-    const words = text.split(/\s+/);
-    if (words.length < 2) {
-      return ctx.reply(
-        '❌ Iltimos, ism va familiyangizni *toʻliq* yozing (Masalan: Alisherbek Usmonov):',
-        { parse_mode: 'Markdown' }
-      );
-    }
-    setState(telegramId, 'fullName', text);
-    setState(telegramId, 'waitingForName', false);
-    setState(telegramId, 'waitingForDescription', true);
-    return ctx.reply(
-      '🎯 Endi loyihangiz haqida batafsil yozing.\n\n' +
-      'Masalan: Restoran uchun zamonaviy buyurtma sayti kerak.',
-      { parse_mode: 'Markdown' }
-    );
-  }
-
-  // 2. Loyiha tavsifi kutilmoqda
-  if (state.waitingForDescription) {
-    if (text.length < 10) {
-      return ctx.reply(
-        '❌ Iltimos, loyihangiz haqida *batafsilroq* yozing (kamida 10 belgi):',
-        { parse_mode: 'Markdown' }
-      );
-    }
-    setState(telegramId, 'description', text);
-    setState(telegramId, 'waitingForDescription', false);
-    setState(telegramId, 'waitingForBudget', true);
-
-    // Xizmat turini aniqlash (faqat ko‘rsatish uchun)
-    const lower = text.toLowerCase();
-    let siteType = 'Maxsus loyiha';
-    let minPrice = 'kelishiladi';
-
-    if (lower.includes('ilova') || lower.includes('app') || lower.includes('web application')) {
-      siteType = 'Veb-Ilova';
-      minPrice = '2 000 000 so‘m ($160)';
-    } else if (lower.includes('do\'kon') || lower.includes('magazin') || lower.includes('shop') || lower.includes('savdo') || lower.includes('market')) {
-      siteType = 'E-Commerce';
-      minPrice = '1 200 000 so‘m ($100)';
-    } else if (lower.includes('bank') || lower.includes('moliya') || lower.includes('fintech') || lower.includes('kredit')) {
-      siteType = 'Bank / Moliya';
-      minPrice = '2 500 000 so‘m ($200)';
-    } else if (lower.includes('taksi') || lower.includes('taxi') || lower.includes('logistika') || lower.includes('dostavka')) {
-      siteType = 'Logistika / Taksi';
-      minPrice = '800 000 so‘m ($65)';
-    } else if (lower.includes('bot') || lower.includes('telegram')) {
-      siteType = 'Telegram Bot';
-      minPrice = '400 000 so‘m ($30)';
-    } else if (lower.includes('landing') || lower.includes('sayt') || lower.includes('site') || lower.includes('vizitka')) {
-      siteType = 'Landing Page / Veb-sayt';
-      minPrice = '500 000 so‘m ($40)';
+bot.start((ctx) => {
+    const userId = ctx.from.id;
+    if (!userState[userId]) userState[userId] = {};
+    userState[userId].lang = 'uz';
+    
+    if (userId.toString() === ADMIN_ID) {
+        ctx.reply("👑 *Xush kelibsiz, Boss!*\nAdmin panelga kirish uchun /admin buyrug'ini yuboring.", { parse_mode: 'Markdown' });
     }
 
-    return ctx.reply(
-      `💡 Tushunarli. Bu *${siteType}* turiga oʻxshaydi.\n` +
-      `📌 Bunday loyihalar narxi *${minPrice}* dan boshlanadi.\n\n` +
-      `💰 Loyiha uchun taxminiy budjetingiz qancha? (Masalan: 500000, 1 500 000 so‘m, $100)`,
-      { parse_mode: 'Markdown' }
-    );
-  }
-
-  // 3. Budjet kutilmoqda
-  if (state.waitingForBudget) {
-    const raw = text.replace(/[^0-9$]/g, '');
-    const numeric = parseInt(raw.replace(/[^0-9]/g, ''), 10);
-    const isDollar = text.includes('$');
-    const minLimit = isDollar ? 10 : 1000;
-
-    if (!raw || numeric < minLimit || text.length > 30) {
-      return ctx.reply(
-        '❌ Iltimos, real budjet miqdorini toʻgʻri yozing (Masalan: 500000, 1 500 000 so‘m, $50):',
-        { parse_mode: 'Markdown' }
-      );
-    }
-
-    setState(telegramId, 'budget', text);
-    setState(telegramId, 'waitingForBudget', false);
-    setState(telegramId, 'waitingForPhone', true);
-
-    // Telefon raqam so‘rash
-    const phoneKeyboard = Markup.keyboard([
-      [Markup.button.contactRequest('📱 Telefon raqamni yuborish')],
-      ['🔙 Ortga'],
-    ]).resize();
-
-    return ctx.reply(
-      '📞 Oxirgi qadam — aloqa uchun telefon raqamingizni yuboring (pastdagi tugma orqali):',
-      phoneKeyboard
-    );
-  }
-
-  // 4. Review kutilmoqda
-  if (state.waitingForReview) {
-    if (text.length < 3) {
-      return ctx.reply('❌ Iltimos, fikringizni batafsil yozing (kamida 3 belgi):');
-    }
-    setState(telegramId, 'waitingForReview', false);
-
-    const rating = state.reviewRating || 0;
-    createReview(telegramId, ctx.from.username || '', rating, text);
-
-    // Adminga xabar
-    const adminMsg =
-      `💬 *Yangi sharh*\n\n` +
-      `👤 ${ctx.from.first_name} (@${ctx.from.username || 'yoq'})\n` +
-      `🆔 \`${telegramId}\`\n` +
-      `⭐️ Baho: ${rating} yulduz\n` +
-      `📝 Fikr: "${escapeMarkdown(text)}"`;
-    ctx.telegram.sendMessage(ADMIN_ID, adminMsg, { parse_mode: 'Markdown' }).catch(() => {});
-
-    ctx.reply('✅ Fikringiz uchun rahmat! 🙏', getMainMenu(lang));
-    return;
-  }
-
-  // 5. Admin parol
-  if (isAdmin(telegramId, ADMIN_ID) && state.waitingForAdminPassword) {
-    if (text === ADMIN_PASSWORD) {
-      setState(telegramId, 'waitingForAdminPassword', false);
-      return showAdminPanel(ctx);
-    } else {
-      return ctx.reply('❌ Notoʻgʻri parol! Qaytadan urinib koʻring:');
-    }
-  }
-
-  // 6. Admin broadcast
-  if (isAdmin(telegramId, ADMIN_ID) && state.waitingForBroadcast) {
-    // Bu yerda broadcast handler faqat media yoki matn uchun ishlaydi, lekin biz buni boshqa handlerda qilamiz
-    // (media handler orqali). Agar matn bo‘lsa, shu yerda ishlaydi.
-    setState(telegramId, 'waitingForBroadcast', false);
-    await broadcastMessage(ctx, ctx.message);
-    return;
-  }
-
-  // Agar hech narsa mos kelmasa, keyingi middleware
-  return next();
-}
-
-// ===================== BUYURTMA TELEFON (CONTACT) =====================
-
-async function contactHandler(ctx) {
-  const telegramId = ctx.from.id.toString();
-  const user = getUser(telegramId);
-  const lang = user?.language || 'uz';
-  const state = getState(telegramId);
-
-  if (!state.waitingForPhone) {
-    ctx.reply('Hozircha telefon raqam kerak emas.', getMainMenu(lang));
-    return;
-  }
-
-  const contact = ctx.message.contact;
-  const phone = contact.phone_number;
-
-  setState(telegramId, 'waitingForPhone', false);
-  setUserPhone(telegramId, phone);
-
-  // Maʼlumotlarni yig‘ish
-  const fullName = state.fullName || ctx.from.first_name || 'Ism kiritilmagan';
-  const service = state.pendingService || 'Umumiy murojaat';
-  const description = state.description || 'Ko‘rsatilmagan';
-  const budget = state.budget || 'Kelishiladi';
-  const discount = getUser(telegramId)?.has_discount ? '🎁 PROMO-2026-VIP (20%)' : 'Yo‘q';
-
-  // DB ga buyurtma yozish
-  createOrder(
-    telegramId,
-    fullName,
-    ctx.from.username || '',
-    phone,
-    service,
-    description,
-    budget,
-    discount
-  );
-
-  // Adminga xabar
-  const adminMsg =
-    `🚨 *YANGI BUYURTMA*\n\n` +
-    `👤 Mijoz: ${escapeMarkdown(fullName)}\n` +
-    `📞 Telefon: ${formatPhone(phone)}\n` +
-    `🔗 Username: @${ctx.from.username || 'mavjud_emas'}\n` +
-    `🆔 ID: \`${telegramId}\`\n` +
-    `💼 Xizmat: ${escapeMarkdown(service)}\n` +
-    `📝 Loyiha: "${escapeMarkdown(description)}"\n` +
-    `💰 Budjet: ${escapeMarkdown(budget)}\n` +
-    `🎁 Chegirma: ${discount}\n` +
-    `🕐 Sana: ${new Date().toLocaleString('uz-UZ')}`;
-
-  try {
-    await ctx.telegram.sendMessage(ADMIN_ID, adminMsg, { parse_mode: 'Markdown' });
-  } catch (e) {
-    await ctx.telegram.sendMessage(ADMIN_ID, adminMsg.replace(/[*_`]/g, ''));
-  }
-
-  // Foydalanuvchiga javob
-  ctx.reply(
-    '✅ Maʼlumotlaringiz qabul qilindi! Tez orada mutaxassisimiz siz bilan bogʻlanadi.\n' +
-    'Rahmat! 🙏',
-    getMainMenu(lang)
-  );
-
-  // Stateni tozalash
-  clearState(telegramId);
-}
-
-// ===================== O‘YIN =====================
-
-function gameHandler(ctx) {
-  const telegramId = ctx.from.id.toString();
-  const user = getUser(telegramId);
-
-  if (user?.has_played) {
-    return ctx.reply('⚠️ Siz bu o‘yinda allaqachon qatnashgansiz! Imkoniyat faqat 1 marta. 😉');
-  }
-
-  const winningBox = Math.floor(Math.random() * 3) + 1;
-  setState(telegramId, 'winningBox', winningBox);
-
-  ctx.reply(
-    '🎮 *Omadli chegirma o‘yini!*\n\n' +
-    '3 ta qutidan birida 20% chegirma promokodi yashiringan.\n' +
-    'O‘zingizga yoqqan birini tanlang:',
-    { parse_mode: 'Markdown', ...getGameKeyboard() }
-  );
-}
-
-function gameBoxCallback(ctx) {
-  const choice = parseInt(ctx.match[1], 10);
-  const telegramId = ctx.from.id.toString();
-  const user = getUser(telegramId);
-
-  if (user?.has_played) {
-    return ctx.answerCbQuery('Siz allaqachon o‘ynagansiz!');
-  }
-
-  const winningBox = getStateValue(telegramId, 'winningBox');
-  if (!winningBox) {
-    return ctx.answerCbQuery('Xatolik, qayta urinib ko‘ring.');
-  }
-
-  setUserPlayed(telegramId);
-
-  if (choice === winningBox) {
-    setUserDiscount(telegramId);
     ctx.reply(
-      '🎉 *TABRIKLAYMIZ! Siz 20% chegirma yutib oldingiz!* 🏆\n\n' +
-      'Promokod: `PROMO-2026-VIP`\n' +
-      'Buyurtma berishda shu kodni aytsangiz kifoya!',
-      { parse_mode: 'Markdown' }
+        "⚡️ *Bilol | Web Developer 💻 studiyasiga xush kelibsiz!*\n\n" +
+        "Biznesingizni raqamlashtirish uchun professional jamoa xizmatda. 🚀\n\n" +
+        "🎁 *Maxsus aksiya:* Mini-o'yinda qatnashing va 20% chegirma yutib oling!\n\n" +
+        "🌐 *Muloqot tilini tanlang:*",
+        { parse_mode: 'Markdown', ...getLangMenu() }
     );
-  } else {
-    ctx.reply(
-      `😢 Afsus, bu quti bo‘sh chiqdi. (Yutuqli quti ${winningBox}-quti edi).\n` +
-      'Keyingi safar albatta omadingiz keladi! ✨'
-    );
-  }
+});
 
-  // State tozalash
-  setState(telegramId, 'winningBox', null);
-}
+// ================= ADMIN PANEL & PASSWORD =================
+bot.command('admin', (ctx) => {
+    if (ctx.from.id.toString() !== ADMIN_ID) return;
 
-// ===================== REYTING =====================
+    const userId = ctx.from.id;
+    if (!userState[userId]) userState[userId] = {};
+    userState[userId].waitingForAdminPassword = true;
 
-function ratingCallback(ctx) {
-  const rating = parseInt(ctx.match[1], 10);
-  const telegramId = ctx.from.id.toString();
-
-  ctx.answerCbQuery();
-  setState(telegramId, 'reviewRating', rating);
-  setState(telegramId, 'waitingForReview', true);
-
-  ctx.reply(
-    `⭐️ Siz ${rating} yulduz baho berdingiz.\n\n✍️ Endi fikringizni yozib qoldiring:`,
-    { parse_mode: 'Markdown' }
-  );
-}
-
-function leaveReviewCallback(ctx) {
-  const telegramId = ctx.from.id.toString();
-  ctx.answerCbQuery();
-  setState(telegramId, 'waitingForReview', true);
-  ctx.reply('✍️ Iltimos, fikringizni yozib yuboring:');
-}
-
-// ===================== ADMIN PANEL =====================
-
-function adminCommand(ctx) {
-  const telegramId = ctx.from.id.toString();
-  if (!isAdmin(telegramId, ADMIN_ID)) {
-    return ctx.reply('⛔ Sizda admin huquqi mavjud emas.');
-  }
-
-  setState(telegramId, 'waitingForAdminPassword', true);
-  ctx.reply('🔐 Admin parolini kiriting:');
-}
+    ctx.reply("🔐 *Admin panelga kirish uchun maxfiy parolni kiriting:*", { parse_mode: 'Markdown' });
+});
 
 function showAdminPanel(ctx) {
-  ctx.reply(
-    '👑 *BILOL ADMIN PANEL*\n\n' +
-    'Quyidagi bo‘limlardan birini tanlang:',
-    { parse_mode: 'Markdown', ...getAdminPanelKeyboard() }
-  );
+    const adminKb = Markup.inlineKeyboard([
+        [Markup.button.callback('📊 To\'liq Statistika & Metrikalar', 'adm_stats')],
+        [Markup.button.callback('📢 Universal Reklama Tarqatish', 'adm_broadcast')],
+        [Markup.button.callback('👥 Foydalanuvchilar Ro\'yxati', 'adm_users')],
+        [Markup.button.callback('🧹 Bloklanganlarni Tozalash (Clean)', 'adm_clean')]
+    ]);
+
+    ctx.reply(
+        "🛡 *BILOL | WEB DEVELOPER — ADMIN CONTROL CENTER*\n\n" +
+        "┏ Xavfsizlik darajasi: `100% (Protected)`\n" +
+        "┣ Tizim holati: `Barqaror / Ishlayapti ⚡️`\n" +
+        "┗ Boshqaruv uchun menyudan foydalaning: 👇", 
+        { parse_mode: 'Markdown', ...adminKb }
+    );
 }
 
-// ===================== ADMIN STATISTIKA =====================
+bot.action('adm_stats', (ctx) => {
+    if (ctx.from.id.toString() !== ADMIN_ID) return;
+    ctx.answerCbQuery().catch(() => {});
+    
+    const uptimeSec = Math.floor((Date.now() - startTime) / 1000);
+    const hours = Math.floor(uptimeSec / 3600);
+    const minutes = Math.floor((uptimeSec % 3600) / 60);
 
-function adminStatsCallback(ctx) {
-  const telegramId = ctx.from.id.toString();
-  if (!isAdmin(telegramId, ADMIN_ID)) return ctx.answerCbQuery();
-
-  ctx.answerCbQuery();
-
-  const totalUsers = countUsers();
-  const blockedUsers = countBlockedUsers();
-  const activeUsers = getActiveUsersCount();
-  const totalOrders = countOrders();
-  const pendingOrders = countOrdersByStatus('kutilmoqda');
-  const completedOrders = countOrdersByStatus('yakunlandi');
-  const totalReviews = countReviews();
-  const playedUsers = countPlayedUsers();
-  const discountUsers = countDiscountUsers();
-
-  const uptimeSeconds = Math.floor((Date.now() - global.startTime) / 1000);
-  const hours = Math.floor(uptimeSeconds / 3600);
-  const minutes = Math.floor((uptimeSeconds % 3600) / 60);
-
-  const msg =
-    `📊 *STATISTIKA*\n\n` +
-    `👥 Jami foydalanuvchilar: ${totalUsers}\n` +
-    `🟢 Faol foydalanuvchilar: ${activeUsers}\n` +
-    `🔴 Bloklanganlar: ${blockedUsers}\n\n` +
-    `📦 Jami buyurtmalar: ${totalOrders}\n` +
-    `⏳ Kutilayotganlar: ${pendingOrders}\n` +
-    `✅ Yakunlanganlar: ${completedOrders}\n\n` +
-    `⭐️ Jami sharhlar: ${totalReviews}\n` +
-    `🎮 O‘yinda qatnashganlar: ${playedUsers}\n` +
-    `🎁 Chegirma yutganlar: ${discountUsers}\n\n` +
-    `🟢 Bot holati: ONLINE\n` +
-    `⏱ Uptime: ${hours} soat ${minutes} daqiqa`;
-
-  ctx.editMessageText(msg, { parse_mode: 'Markdown', ...getBackKeyboard() }).catch(() => {});
-}
-
-// ===================== ADMIN BUYURTMALAR =====================
-
-function adminOrdersCallback(ctx) {
-  const telegramId = ctx.from.id.toString();
-  if (!isAdmin(telegramId, ADMIN_ID)) return ctx.answerCbQuery();
-
-  ctx.answerCbQuery();
-
-  const orders = getOrders(10);
-  if (orders.length === 0) {
     ctx.editMessageText(
-      '📦 Hozircha buyurtmalar yo‘q.',
-      { parse_mode: 'Markdown', ...getBackKeyboard() }
+        `📊 *Tizim Statistikasi & Metrikalar:*\n\n` +
+        `👥 Jami foydalanuvchilar: \`${allUsers.size}\` ta\n` +
+        `⏱️ Ishlab turish vaqti (Uptime): \`${hours} soat, ${minutes} daqiqa\`\n` +
+        `🤖 Bot holati: \`Optimal (Stable) ⚡️\`\n` +
+        `⚙️ Arxitektura: \`Telegraf v4 / Node.js\`\n` +
+        `💎 Versiya: \`v3.5 Professional Enterprise\``,
+        { 
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+                [Markup.button.callback('🔙 Orqaga', 'adm_back')]
+            ])
+        }
     ).catch(() => {});
-    return;
-  }
+});
 
-  let msg = '📦 *Oxirgi 10 ta buyurtma:*\n\n';
-  orders.forEach((o, i) => {
-    msg +=
-      `${i + 1}. 👤 ${escapeMarkdown(o.full_name)} | ${o.phone}\n` +
-      `   💼 ${escapeMarkdown(o.service)}\n` +
-      `   📝 ${escapeMarkdown(o.description.substring(0, 50))}${o.description.length > 50 ? '...' : ''}\n` +
-      `   💰 ${escapeMarkdown(o.budget || 'Kelishiladi')}\n` +
-      `   📌 Status: ${statusEmoji(o.status)} ${escapeMarkdown(o.status)}\n` +
-      `   🕐 ${new Date(o.created_at).toLocaleString('uz-UZ')}\n\n`;
-  });
+bot.action('adm_back', (ctx) => {
+    if (ctx.from.id.toString() !== ADMIN_ID) return;
+    ctx.answerCbQuery().catch(() => {});
 
-  ctx.editMessageText(msg, { parse_mode: 'Markdown', ...getBackKeyboard() }).catch(() => {});
-}
+    const adminKb = Markup.inlineKeyboard([
+        [Markup.button.callback('📊 To\'liq Statistika & Metrikalar', 'adm_stats')],
+        [Markup.button.callback('📢 Universal Reklama Tarqatish', 'adm_broadcast')],
+        [Markup.button.callback('👥 Foydalanuvchilar Ro\'yxati', 'adm_users')],
+        [Markup.button.callback('🧹 Bloklanganlarni Tozalash (Clean)', 'adm_clean')]
+    ]);
 
-function statusEmoji(status) {
-  const map = {
-    'kutilmoqda': '🟡',
-    'jarayonda': '🔵',
-    'yakunlandi': '🟢',
-    'bekor qilindi': '🔴',
-  };
-  return map[status] || '⚪';
-}
-
-// ===================== ADMIN FOYDALANUVCHILAR =====================
-
-function adminUsersCallback(ctx) {
-  const telegramId = ctx.from.id.toString();
-  if (!isAdmin(telegramId, ADMIN_ID)) return ctx.answerCbQuery();
-
-  ctx.answerCbQuery();
-
-  const users = getAllUsers(20);
-  if (users.length === 0) {
     ctx.editMessageText(
-      '👥 Hozircha foydalanuvchilar yo‘q.',
-      { parse_mode: 'Markdown', ...getBackKeyboard() }
+        "🛡 *BILOL | WEB DEVELOPER — ADMIN CONTROL CENTER*\n\n" +
+        "┏ Xavfsizlik darajasi: `100% (Protected)`\n" +
+        "┣ Tizim holati: `Barqaror / Ishlayapti ⚡️`\n" +
+        "┗ Boshqaruv uchun menyudan foydalaning: 👇", 
+        { parse_mode: 'Markdown', ...adminKb }
     ).catch(() => {});
-    return;
-  }
+});
 
-  let msg = '👥 *Oxirgi 20 ta foydalanuvchi:*\n\n';
-  users.forEach((u, i) => {
-    msg +=
-      `${i + 1}. ${escapeMarkdown(u.first_name || 'Noma\'lum')} ` +
-      `@${u.username || 'yoq'} ` +
-      `[${u.is_blocked ? '🔴' : '🟢'}]\n`;
-  });
+bot.action('adm_broadcast', (ctx) => {
+    if (ctx.from.id.toString() !== ADMIN_ID) return;
+    ctx.answerCbQuery().catch(() => {});
+    userState[ctx.from.id].waitingForBroadcast = true;
+    
+    ctx.reply(
+        "📢 *Universal Reklama Rejimi Faollashdi!*\n\n" +
+        "Endi xohlagan turdagi reklamangizni yuborishingiz mumkin:\n" +
+        "• 🖼 Rasm va tagida matn bilan\n" +
+        "• 📹 Video yoki fayl shaklida\n" +
+        "• 📄 Oddiy matn yoki tugmali xabar ko'rinishida\n\n" +
+        "_Nima yuborsangiz, kanalingizga va barcha foydalanuvchilarga birdek boradi!_",
+        { parse_mode: 'Markdown' }
+    );
+});
 
-  ctx.editMessageText(msg, { parse_mode: 'Markdown', ...getBackKeyboard() }).catch(() => {});
-}
+bot.action('adm_users', (ctx) => {
+    if (ctx.from.id.toString() !== ADMIN_ID) return;
+    ctx.answerCbQuery().catch(() => {});
+    
+    const usersArr = Array.from(allUsers);
+    const sampleList = usersArr.slice(-10).join(', ');
 
-// ===================== ADMIN SHARHLAR =====================
+    ctx.reply(
+        `👥 *Foydalanuvchilar Ma'lumotnomasi:*\n\n` +
+        `• Bazadagilar soni: \`${usersArr.length}\` ta\n` +
+        `• Oxirgi faol IDlar: \`${sampleList || 'Hozircha yo\'q'}\``,
+        { 
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+                [Markup.button.callback('🔙 Orqaga', 'adm_back')]
+            ])
+        }
+    );
+});
 
-function adminReviewsCallback(ctx) {
-  const telegramId = ctx.from.id.toString();
-  if (!isAdmin(telegramId, ADMIN_ID)) return ctx.answerCbQuery();
+bot.action('adm_clean', async (ctx) => {
+    if (ctx.from.id.toString() !== ADMIN_ID) return;
+    ctx.answerCbQuery().catch(() => {});
+    
+    let active = 0;
+    let removed = 0;
+    await ctx.reply("⏳ Bazadagi faollik tekshirilmoqda, iltimos kuting...");
 
-  ctx.answerCbQuery();
-
-  const reviews = getReviews(10);
-  if (reviews.length === 0) {
-    ctx.editMessageText(
-      '⭐️ Hozircha sharhlar yo‘q.',
-      { parse_mode: 'Markdown', ...getBackKeyboard() }
-    ).catch(() => {});
-    return;
-  }
-
-  let msg = '⭐️ *Oxirgi 10 ta sharh:*\n\n';
-  reviews.forEach((r, i) => {
-    msg +=
-      `${i + 1}. @${r.username || 'yoq'} — ${'⭐️'.repeat(r.rating || 0)}\n` +
-      `   "${escapeMarkdown(r.review.substring(0, 100))}${r.review.length > 100 ? '...' : ''}"\n` +
-      `   🕐 ${new Date(r.created_at).toLocaleString('uz-UZ')}\n\n`;
-  });
-
-  ctx.editMessageText(msg, { parse_mode: 'Markdown', ...getBackKeyboard() }).catch(() => {});
-}
-
-// ===================== ADMIN BROADCAST =====================
-
-function adminBroadcastCallback(ctx) {
-  const telegramId = ctx.from.id.toString();
-  if (!isAdmin(telegramId, ADMIN_ID)) return ctx.answerCbQuery();
-
-  ctx.answerCbQuery();
-  setState(telegramId, 'waitingForBroadcast', true);
-
-  ctx.reply(
-    '📢 *Reklama tarqatish rejimi faollashtirildi!*\n\n' +
-    'Endi xohlagan turdagi xabaringizni (matn, rasm, video, hujjat, audio) yuboring.\n' +
-    'Xabar barcha faol foydalanuvchilarga va kanalga yuboriladi.',
-    { parse_mode: 'Markdown' }
-  );
-}
-
-// ===================== ADMIN CLEAN =====================
-
-async function adminCleanCallback(ctx) {
-  const telegramId = ctx.from.id.toString();
-  if (!isAdmin(telegramId, ADMIN_ID)) return ctx.answerCbQuery();
-
-  ctx.answerCbQuery();
-  await ctx.reply('⏳ Bloklangan foydalanuvchilar tekshirilmoqda...');
-
-  const allUsers = getAllUsers(1000);
-  const userIds = allUsers.map(u => u.telegram_id);
-
-  const blockedCount = await checkAndMarkBlockedUsers(ctx.telegram, userIds);
-
-  const total = countUsers();
-  const blocked = countBlockedUsers();
-  const active = total - blocked;
-
-  ctx.editMessageText(
-    `🧹 *Tozalash yakunlandi!*\n\n` +
-    `🟢 Faol: ${active}\n` +
-    `🔴 Bloklangan: ${blocked}\n` +
-    `📌 Jami: ${total}\n` +
-    `🆕 Yangi bloklanganlar: ${blockedCount}`,
-    { parse_mode: 'Markdown', ...getBackKeyboard() }
-  ).catch(() => {});
-}
-
-// ===================== ADMIN SYSTEM =====================
-
-function adminSystemCallback(ctx) {
-  const telegramId = ctx.from.id.toString();
-  if (!isAdmin(telegramId, ADMIN_ID)) return ctx.answerCbQuery();
-
-  ctx.answerCbQuery();
-
-  const uptimeSeconds = Math.floor((Date.now() - global.startTime) / 1000);
-  const hours = Math.floor(uptimeSeconds / 3600);
-  const minutes = Math.floor((uptimeSeconds % 3600) / 60);
-
-  const msg =
-    `⚙️ *Tizim maʼlumotlari*\n\n` +
-    `🤖 Bot: Bilol | Web Developer\n` +
-    `📦 Versiya: 3.5.0\n` +
-    `⏱ Uptime: ${hours} soat ${minutes} daqiqa\n` +
-    `🧠 Node.js: ${process.version}\n` +
-    `📊 Xotira: ${Math.round(process.memoryUsage().rss / 1024 / 1024)} MB\n` +
-    `🟢 Holat: Barqaror`;
-
-  ctx.editMessageText(msg, { parse_mode: 'Markdown', ...getBackKeyboard() }).catch(() => {});
-}
-
-// ===================== ADMIN ORQAGA =====================
-
-function adminBackCallback(ctx) {
-  const telegramId = ctx.from.id.toString();
-  if (!isAdmin(telegramId, ADMIN_ID)) return ctx.answerCbQuery();
-
-  ctx.answerCbQuery();
-  showAdminPanel(ctx);
-}
-
-// ===================== BROADCAST FUNKSIYASI =====================
-
-async function broadcastMessage(ctx, message) {
-  const telegramId = ctx.from.id.toString();
-
-  // Kanalga yuborish
-  let channelSuccess = 0;
-  try {
-    await ctx.telegram.copyMessage(TARGET_CHANNEL, ctx.chat.id, message.message_id);
-    channelSuccess = 1;
-  } catch (e) {
-    console.log('Kanalga yuborish xatosi:', e.message);
-  }
-
-  // Foydalanuvchilarga yuborish
-  const users = getAllUsers(1000);
-  let success = 0;
-  let fail = 0;
-
-  for (const user of users) {
-    if (user.is_blocked) continue;
-    try {
-      await ctx.telegram.copyMessage(user.telegram_id, ctx.chat.id, message.message_id);
-      success++;
-      // Flood limitdan qochish uchun kichik delay
-      await new Promise(resolve => setTimeout(resolve, 50));
-    } catch (e) {
-      if (e.response && e.response.error_code === 403) {
-        setUserBlocked(user.telegram_id, 1);
-      }
-      fail++;
+    for (const id of allUsers) {
+        try {
+            await ctx.telegram.sendChatAction(id, "typing");
+            active++;
+        } catch (e) {
+            allUsers.delete(id);
+            removed++;
+        }
     }
-  }
 
-  ctx.reply(
-    `📢 *Reklama tarqatish yakunlandi!*\n\n` +
-    `✅ Kanalga: ${channelSuccess}\n` +
-    `✅ Foydalanuvchilarga: ${success}\n` +
-    `❌ Yuborilmadi: ${fail}`,
-    { parse_mode: 'Markdown' }
-  );
+    ctx.reply(
+        `✅ *Tozalash jarayoni yakunlandi!*\n\n` +
+        `🟢 Faol va ochiq foydalanuvchilar: \`${active}\` ta\n` +
+        `🔴 Botni bloklaganlar (o'chirilganlar): \`${removed}\` ta`,
+        { parse_mode: 'Markdown' }
+    );
+});
+// ============================================================
+
+bot.action('lang_uz', (ctx) => {
+    const userId = ctx.from.id;
+    if (!userState[userId]) userState[userId] = {};
+    userState[userId].lang = 'uz';
+    ctx.reply("🇺🇿 O'zbek tili faollashdi. Kerakli bo'limni tanlang 👇", { parse_mode: 'Markdown', ...getMainMenu('uz') });
+});
+
+bot.action('lang_ru', (ctx) => {
+    const userId = ctx.from.id;
+    if (!userState[userId]) userState[userId] = {};
+    userState[userId].lang = 'ru';
+    ctx.reply("🇷🇺 Русский язык активирован. Выберите нужный раздел 👇", { parse_mode: 'Markdown', ...getMainMenu('ru') });
+});
+
+bot.action('lang_en', (ctx) => {
+    const userId = ctx.from.id;
+    if (!userState[userId]) userState[userId] = {};
+    userState[userId].lang = 'en';
+    ctx.reply("🇬🇧 English selected. Choose a section below 👇", { parse_mode: 'Markdown', ...getMainMenu('en') });
+});
+
+function getMainMenu(lang) {
+    if (lang === 'ru') {
+        return Markup.keyboard([
+            ['💻 Портфолио проектов', '⚙️ Услуги и Прайс'],
+            ['🎮 Выиграть скидку 20%', '⭐️ Отзывы клиентов'],
+            ['📞 Контакты', '💻 Заказать проект'],
+            ['🌐 Изменить язык']
+        ]).resize();
+    } else if (lang === 'en') {
+        return Markup.keyboard([
+            ['💻 Portfolio', '⚙️ Services & Pricing'],
+            ['🎮 Win 20% Discount', '⭐️ Client Reviews'],
+            ['📞 Contacts', '💻 Order Project'],
+            ['🌐 Change Language']
+        ]).resize();
+    } else {
+        return Markup.keyboard([
+            ['💻 Bizning ishlar (Portfolio)', '⚙️ Xizmatlar va Narxlar'],
+            ['🎮 Chegirma yutish (Mini-O\'yin)', '⭐️ Mijozlar fikri'],
+            ['📞 Aloqa va Murojaat', '💻 Loyihaga buyurtma'],
+            ['🌐 Tilni o\'zgartirish']
+        ]).resize();
+    }
 }
 
-// ===================== MEDIA BROADCAST HANDLER =====================
+bot.hears(['🌐 Tilni o\'zgartirish', '🌐 Изменить язык', '🌐 Change Language'], (ctx) => {
+    ctx.reply("🌐 Tilni o'zgartirish:", getLangMenu());
+});
 
-async function mediaBroadcastHandler(ctx) {
-  const telegramId = ctx.from.id.toString();
-  if (!isAdmin(telegramId, ADMIN_ID)) return;
-  if (!getStateValue(telegramId, 'waitingForBroadcast')) return;
+bot.hears(['⚙️ Xizmatlar va Narxlar', '⚙️ Услуги и Прайс', '⚙️ Services & Pricing'], (ctx) => {
+    const servicesKeyboard = Markup.inlineKeyboard([
+        [Markup.button.callback('🚀 1. Landing Page (Sotuvchi sayt)', 'srv_landing')],
+        [Markup.button.callback('🛍 2. E-Commerce (Onlayn do\'kon)', 'srv_shop')],
+        [Markup.button.callback('🏢 3. Korporativ veb-sayt', 'srv_corporate')],
+        [Markup.button.callback('🤖 4. Telegram Bot & Avtomatlashtirish', 'srv_bot')],
+        [Markup.button.callback('📱 5. Veb-Ilova (Web Application)', 'srv_webapp')]
+    ]);
 
-  setState(telegramId, 'waitingForBroadcast', false);
-  await broadcastMessage(ctx, ctx.message);
+    ctx.reply(
+        "🛠 *Bilol | Web Developer 💻 — Professional xizmatlarimiz:*\n\n" +
+        "💡 *Muhim eslatma:* Narxlar loyihaning murakkabligiga qarab **yana kelishiladi!** Hamyonbob va sifatli natija kafolatlanadi. 🤝\n\n" +
+        "📌 *To'lov sharti:* Barcha loyihalar uchun **50% oldindan to'lov** amalga oshiriladi.\n\n" +
+        "Quyidagi yo'nalishlardan birini tanlang: 👇",
+        { parse_mode: 'Markdown', ...servicesKeyboard }
+    );
+});
+
+bot.action(/^srv_(.+)$/, (ctx) => {
+    ctx.answerCbQuery().catch(() => {});
+    const type = ctx.match[1];
+    
+    let info = "";
+    let code = "";
+
+    if (type === 'landing') {
+        info = "🚀 *1. Landing Page (Sotuvchi sayt)*\n\n" +
+               "• *Muddat:* 2–4 kun\n" +
+               "• *Narxi:* 500,000 so'm ($40) dan boshlab\n" +
+               "• *Kelishuv:* 🤝 Narxi yana o'zaro kelishiladi!\n" +
+               "• *Oldindan to'lov (50%):* 250,000 so'm";
+        code = "order_landing";
+    } else if (type === 'shop') {
+        info = "🛍 *2. E-Commerce (Onlayn do'kon)*\n\n" +
+               "• *Muddat:* 7–10 kun\n" +
+               "• *Narxi:* 1,200,000 so'm ($100) dan boshlab\n" +
+               "• *Kelishuv:* 🤝 Narxi yana o'zaro kelishiladi!\n" +
+               "• *Oldindan to'lov (50%):* 600,000 so'm";
+        code = "order_shop";
+    } else if (type === 'corporate') {
+        info = "🏢 *3. Korporativ veb-sayt*\n\n" +
+               "• *Muddat:* 3–5 kun\n" +
+               "• *Narxi:* 800,000 so'm ($65) dan boshlab\n" +
+               "• *Kelishuv:* 🤝 Narxi yana o'zaro kelishiladi!\n" +
+               "• *Oldindan to'lov (50%):* 400,000 so'm";
+        code = "order_corporate";
+    } else if (type === 'bot') {
+        info = "🤖 *4. Telegram Bot va Avtomatlashtirish*\n\n" +
+               "• *Muddat:* 2–5 kun\n" +
+               "• *Narxi:* 400,000 so'm ($30) dan boshlab\n" +
+               "• *Kelishuv:* 🤝 Narxi yana o'zaro kelishiladi!\n" +
+               "• *Oldindan to'lov (50%):* 200,000 so'm";
+        code = "order_bot";
+    } else if (type === 'webapp') {
+        info = "📱 *5. Veb-Ilova (Web Application)*\n\n" +
+               "• *Muddat:* 10–15 kun\n" +
+               "• *Narxi:* 2,000,000 so'm ($160) dan boshlab\n" +
+               "• *Kelishuv:* 🤝 Narxi yana o'zaro kelishiladi!\n" +
+               "• *Oldindan to'lov (50%):* 1,000,000 so'm";
+        code = "order_webapp";
+    }
+
+    const kb = Markup.inlineKeyboard([
+        [Markup.button.callback('✨ Shu xizmatga buyurtma berish', code)]
+    ]);
+
+    ctx.reply(info, { parse_mode: 'Markdown', ...kb });
+});
+
+bot.action(/^order_(.+)$/, (ctx) => {
+    ctx.answerCbQuery().catch(() => {});
+    const sType = ctx.match[1];
+    const userId = ctx.from.id;
+    if (!userState[userId]) userState[userId] = {};
+    userState[userId].pendingService = sType;
+    
+    askAgreement(ctx);
+});
+
+bot.hears(['💻 Loyihaga buyurtma', '💻 Заказать проект', '💻 Order Project'], (ctx) => {
+    const userId = ctx.from.id;
+    if (!userState[userId]) userState[userId] = {};
+    userState[userId].pendingService = "Umumiy murojaat";
+
+    askAgreement(ctx);
+});
+
+function askAgreement(ctx) {
+    const kb = Markup.inlineKeyboard([
+        [Markup.button.callback('✅ Roziman', 'agree_yes'), Markup.button.callback('❌ Bekor qilish', 'agree_no')]
+    ]);
+    ctx.reply(
+        "🤝 *Buyurtma shartlari bilan tanishish:*\n\n" +
+        "Barcha loyihalar uchun **50% oldindan to'lov** amalga oshiriladi va qolgan narxlar o'zaro kelishiladi. " +
+        "Ushbu shartga rozimisiz?",
+        { parse_mode: 'Markdown', ...kb }
+    );
 }
 
-// ===================== EXPORT =====================
+bot.action('agree_no', (ctx) => {
+    ctx.answerCbQuery().catch(() => {});
+    ctx.editMessageText("Buyurtma jarayoni bekor qilindi. ❌").catch(() => {});
+});
 
-module.exports = {
-  startHandler,
-  languageCallback,
-  mainMenuHandler,
-  serviceCallback,
-  orderCallback,
-  agreementCallback,
-  textHandler,
-  contactHandler,
-  gameHandler,
-  gameBoxCallback,
-  ratingCallback,
-  leaveReviewCallback,
-  adminCommand,
-  adminStatsCallback,
-  adminOrdersCallback,
-  adminUsersCallback,
-  adminReviewsCallback,
-  adminBroadcastCallback,
-  adminCleanCallback,
-  adminSystemCallback,
-  adminBackCallback,
-  mediaBroadcastHandler,
-  showAdminPanel,
-};
+bot.action('agree_yes', (ctx) => {
+    ctx.answerCbQuery().catch(() => {});
+    const userId = ctx.from.id;
+    if (!userState[userId]) userState[userId] = {};
+    userState[userId].waitingForName = true;
+
+    ctx.editMessageText("✅ Rozilik qabul qilindi. Ajoyib tanlov! 🚀\n\n📝 Iltimos, ism va familiyangizni to'liq kiriting (Masalan: Alisherbek Usmonov):", { parse_mode: 'Markdown' }).catch(() => {});
+});
+
+bot.hears(['💻 Bizning ishlar (Portfolio)', '💻 Портфолио проектов', '💻 Portfolio'], (ctx) => {
+    const text = "💻 *Bilol | Web Developer 💻 — Biz amalga oshirgan eng so'nggi muvaffaqiyatli loyihalar:*\n\nO'zingizga yoqqan namunani ko'rib chiqing 👇";
+    const kb = Markup.inlineKeyboard([
+        [Markup.button.url('🌐 Korporativ Platforma', 'https://fastidious-starburst-7aa5e3.netlify.app/')],
+        [Markup.button.url('👔 Brending & Magazin', 'https://monumental-dieffenbachia-aac848.netlify.app/')],
+        [Markup.button.url('🚖 Logistika va Taksi Sys', 'https://spontaneous-pothos-202271.netlify.app/')],
+        [Markup.button.url('🔥 Startup Landing Page', 'https://fascinating-sundae-f41c81.netlify.app/')]
+    ]);
+    ctx.reply(text, { parse_mode: 'Markdown', ...kb });
+});
+
+bot.hears(['⭐️ Mijozlar fikri', '⭐️ Отзывы клиентов', '⭐️ Client Reviews'], (ctx) => {
+    const msg = 
+        "⭐️ *Mijozlarimiz Bilol | Web Developer haqida nima deyishadi?*\n\n" +
+        "👤 *Javohir (Startup asoschisi):*\n_“Veb-sayt o'ylaganimdan ham tez va professional chiqdi!”_\n\n" +
+        "👤 *Dilshod (Do'kon egasi):*\n_“Onlayn do'konimiz ishga tushgach, savdolar keskin oshdi. Rahmat!”_\n\n" +
+        "👇 *O'z fikringizni qoldiring:*";
+
+    const ratingKb = Markup.inlineKeyboard([
+        [
+            Markup.button.callback('⭐️ 1', 'rate_1'),
+            Markup.button.callback('⭐️ 2', 'rate_2'),
+            Markup.button.callback('⭐️ 3', 'rate_3'),
+            Markup.button.callback('⭐️ 4', 'rate_4'),
+            Markup.button.callback('⭐️ 5', 'rate_5')
+        ],
+        [Markup.button.callback('✍️ Fikr yozib qoldirish', 'leave_review')]
+    ]);
+
+    ctx.reply(msg, { parse_mode: 'Markdown', ...ratingKb });
+});
+
+bot.action(/^rate_([1-5])$/, (ctx) => {
+    ctx.answerCbQuery().catch(() => {});
+    const num = ctx.match[1];
+    ctx.reply(`Rahmat! Siz Bilol | Web Developer 💻 botiga **${num} ta yulduz** baho berdingiz. ❤️ Biz siz uchun yanada yaxshilashga harakat qilamiz!`, { parse_mode: 'Markdown' });
+});
+
+bot.action('leave_review', (ctx) => {
+    ctx.answerCbQuery().catch(() => {});
+    const userId = ctx.from.id;
+    if (!userState[userId]) userState[userId] = {};
+    userState[userId].waitingForReview = true;
+    ctx.reply("✍️ Marhamat, o'z fikringiz yoki taklifingizni shu yerga yuboring:", { parse_mode: 'Markdown' });
+});
+
+// ================= STRICT VALIDATION HANDLER =================
+bot.on(['text', 'photo', 'video', 'document', 'audio', 'animation'], async (ctx, next) => {
+    const userId = ctx.from.id;
+    if (!userState[userId]) userState[userId] = {};
+
+    // 1. Ism va Familiyani qat'iy tekshirish
+    if (userState[userId].waitingForName && ctx.message && ctx.message.text) {
+        const text = ctx.message.text.trim();
+        const words = text.split(/\s+/);
+
+        if (words.length < 2) {
+            return ctx.reply("❌ Xatolik! Iltimos, ism va familiyangizni **to'liq** yozing (Masalan: Alisherbek Usmonov):", { parse_mode: 'Markdown' });
+        }
+
+        userState[userId].waitingForName = false;
+        userState[userId].clientFullName = text;
+        userState[userId].waitingForOrderDesc = true;
+
+        return ctx.reply("🎯 Ajoyib! Endi qisqacha **nima buyurtma qilmoqchisiz** va loyihangiz haqida batafsil yozib yuboring:", { parse_mode: 'Markdown' });
+    }
+
+    // 2. Loyiha izohi to'g'ri kiritilgach, qanday sayt ekanligini va narxini aniqlash
+    if (userState[userId].waitingForOrderDesc && ctx.message && ctx.message.text) {
+        const descText = ctx.message.text.trim();
+        
+        if (descText.length < 4) {
+            return ctx.reply("❌ Xatolik! Iltimos, loyihangiz haqida **batafsroq** ma'lumot yozib yuboring (Masalan: Taksi xizmati uchun buyurtma sayti):", { parse_mode: 'Markdown' });
+        }
+
+        const lowerDesc = descText.toLowerCase();
+        let siteTypeMsg = "";
+        let minPrice = "";
+        let isKnownService = true;
+
+        if (lowerDesc.includes('ilov') || lowerDesc.includes('app') || lowerDesc.includes('web application') || lowerDesc.includes('veb-ilova')) {
+            siteTypeMsg = "Murakkab veb-ilova (Web Application)";
+            minPrice = "2,000,000 so'm ($160)";
+        } else if (lowerDesc.includes('do') || lowerDesc.includes('magazin') || lowerDesc.includes('shop') || lowerDesc.includes('savdo') || lowerDesc.includes('uzum') || lowerDesc.includes('market')) {
+            siteTypeMsg = "Onlayn do'kon (E-Commerce) platformasi";
+            minPrice = "1,200,000 so'm ($100)";
+        } else if (lowerDesc.includes('bank') || lowerDesc.includes('moliya') || lowerDesc.includes('fintech') || lowerDesc.includes('kredit')) {
+            siteTypeMsg = "Bank va Moliya tizimi / Veb-ilovasi";
+            minPrice = "2,500,000 so'm ($200)";
+        } else if (lowerDesc.includes('taksi') || lowerDesc.includes('taxi') || lowerDesc.includes('logistika') || lowerDesc.includes('dostavka')) {
+            siteTypeMsg = "Logistika va taksi xizmatini avtomatlashtirish tizimi";
+            minPrice = "800,000 so'm ($65)";
+        } else if (lowerDesc.includes('bot') || lowerDesc.includes('telegram')) {
+            siteTypeMsg = "Telegram bot va avtomatlashtirish tizimi";
+            minPrice = "400,000 so'm ($30)";
+        } else if (lowerDesc.includes('landing') || lowerDesc.includes('sayt') || lowerDesc.includes('site') || lowerDesc.includes('vizitka') || lowerDesc.includes('notebook')) {
+            siteTypeMsg = "Maxsus biznes uchun Landing Page / Veb-sayt";
+            minPrice = "500,000 so'm ($40)";
+        } else {
+            isKnownService = false;
+        }
+
+        if (!isKnownService) {
+            userState[userId].waitingForOrderDesc = false;
+            const contactAdminKb = Markup.inlineKeyboard([
+                [Markup.button.url('💬 Admin bilan bog\'lanish', 'https://t.me/sharipoov1')],
+                [Markup.button.callback('🔙 Asosiy menyu', 'agree_no')]
+            ]);
+            return ctx.reply(
+                "❌ Kechirasiz, bizda bu yo'nalish bo'yicha tayyor xizmat turi topilmadi.\n\n" +
+                "Batafsil ma'lumot olish va narxini kelishish uchun admin bilan bog'laning: 👇",
+                { parse_mode: 'Markdown', ...contactAdminKb }
+            );
+        }
+
+        userState[userId].waitingForOrderDesc = false;
+        userState[userId].orderDescription = descText;
+        userState[userId].waitingForBudget = true;
+
+        return ctx.reply(
+            `💡 Tushunarli. Demak, bu **${siteTypeMsg}** ekan.\n` +
+            `📌 Bunday turdagi saytlar va loyihalar narxi **${minPrice}** dan boshlanadi!\n\n` +
+            `💰 Ushbu loyiha uchun ajratgan taxminiy budjetingiz qancha? (Aniq raqamni kiriting):`,
+            { parse_mode: 'Markdown' }
+        );
+    }
+
+    // 3. Budjet tekshiruvi
+    if (userState[userId].waitingForBudget && ctx.message && ctx.message.text) {
+        const budgetText = ctx.message.text.trim();
+        
+        const rawNumbers = budgetText.replace(/[^0-9]/g, '');
+        const numericValue = parseInt(rawNumbers, 10);
+        
+        const isOnlyZeros = /^0+$/.test(rawNumbers);
+        const hasNumber = /\d/.test(budgetText);
+        const isDollar = budgetText.includes('$');
+        const minLimit = isDollar ? 10 : 1000;
+
+        if (!hasNumber || isOnlyZeros || numericValue < minLimit || budgetText.length > 20) {
+            return ctx.reply(
+                "❌ Xatolik! Iltimos, real budjet miqdorini to'g'ri yozing (Masalan: 500,000 so'm yoki $50):",
+                { parse_mode: 'Markdown' }
+            );
+        }
+
+        userState[userId].waitingForBudget = false;
+        userState[userId].clientBudget = budgetText;
+        userState[userId].waitingForPhone = true;
+
+        return ctx.reply(
+            "📞 Ajoyib! Oxirgi qadam — aloqa uchun telefon raqamingizni yuboring (Pastdagi tugmani bosing):",
+            Markup.keyboard([
+                [Markup.button.contactRequest("📱 Telefon raqamni yuborish")],
+                ['🔙 Ortga']
+            ]).resize()
+        );
+    }
+
+    if (userState[userId].waitingForReview && ctx.message && ctx.message.text) {
+        userState[userId].waitingForReview = false;
+        const reviewText = ctx.message.text;
+        const user = ctx.message.from;
+
+        const adminText = `💬 *Bilol | Web Developer — Yangi mijoz sharhi keldi!*\n\n` +
+                          `👤 Kimdan: ${user.first_name} (@${user.username || 'yoq'})\n` +
+                          `🆔 Telegram ID: \`${user.id}\`\n` +
+                          `📝 Fikr matni: _"${reviewText}"_`;
+        ctx.telegram.sendMessage(ADMIN_ID, adminText, { parse_mode: 'Markdown' }).catch(() => {});
+        return ctx.reply("✅ Fikringiz uchun rahmat! Adminga yetkazildi. 🙏");
+    }
+
+    // 4. Admin parol tekshiruvi
+    if (userId.toString() === ADMIN_ID && userState[userId].waitingForAdminPassword) {
+        if (ctx.message && ctx.message.text) {
+            const passwordInput = ctx.message.text.trim();
+            if (passwordInput === ADMIN_PASSWORD) {
+                userState[userId].waitingForAdminPassword = false;
+                return showAdminPanel(ctx);
+            } else {
+                return ctx.reply("❌ Noto'g'ri parol! Qaytadan urinib ko'ring:");
+            }
+        }
+    }
+
+    // 5. Universal Reklama tarqatish
+    if (userId.toString() === ADMIN_ID && userState[userId].waitingForBroadcast) {
+        userState[userId].waitingForBroadcast = false;
+        
+        let successCount = 0;
+        let failCount = 0;
+
+        await ctx.reply("⏳ Reklama kanal va foydalanuvchilarga tarqatilmoqda, iltimos kuting...");
+
+        try {
+            await ctx.telegram.copyMessage(TARGET_CHANNEL, ctx.chat.id, ctx.message.message_id);
+            successCount++;
+        } catch (e) {
+            console.log("Kanalga yuborishda xatolik:", e.message);
+        }
+
+        for (const id of allUsers) {
+            try {
+                await ctx.telegram.copyMessage(id, ctx.chat.id, ctx.message.message_id);
+                successCount++;
+            } catch (e) {
+                failCount++;
+            }
+        }
+
+        return ctx.reply(
+            `✅ *Reklama tarqatish yakunlandi!*\n\n` +
+            `📤 Muvaffaqiyatli yetib bordi: \`${successCount}\` ta (Kanal + Foydalanuvchilar)\n` +
+            `⚠️ Yetib bormadi (bloklaganlar): \`${failCount}\` ta`,
+            { parse_mode: 'Markdown' }
+        );
+    }
+
+    return next();
+});
+
+bot.hears(['🎮 Chegirma yutish (Mini-O\'yin)', '🎮 Выиграть скидку 20%', '🎮 Win 20% Discount'], (ctx) => {
+    const userId = ctx.from.id;
+    if (!userState[userId]) userState[userId] = {};
+
+    if (userState[userId].hasPlayed) {
+        return ctx.reply("⚠️ Siz bu o'yinda allaqachon qatnashgansiz! Imkoniyat faqat 1 marta beriladi. 😉");
+    }
+
+    const winningBox = Math.floor(Math.random() * 3) + 1;
+    userState[userId].winningBox = winningBox;
+
+    const gameKb = Markup.inlineKeyboard([
+        [
+            Markup.button.callback('🎁 1-Quti', 'box_1'),
+            Markup.button.callback('🎁 2-Quti', 'box_2'),
+            Markup.button.callback('🎁 3-Quti', 'box_3')
+        ]
+    ]);
+
+    ctx.reply(
+        "🎮 *Bilol | Web Developer — Omadli Chegirma O'yini!*\n\n3 ta sirli qutidan birida 20% chegirma promokodi yashiringan. O'zingizga yoqqan birini tanlang:",
+        { parse_mode: 'Markdown', ...gameKb }
+    );
+});
+
+bot.action(/^box_(\d+)$/, (ctx) => {
+    ctx.answerCbQuery().catch(() => {});
+    const userId = ctx.from.id;
+    const choice = parseInt(ctx.match[1], 10);
+
+    if (!userState[userId]) userState[userId] = {};
+    if (userState[userId].hasPlayed) {
+        return ctx.reply("⚠️ Siz allaqachon o'ynagansiz!");
+    }
+
+    userState[userId].hasPlayed = true;
+    const winningBox = userState[userId].winningBox;
+
+    if (choice === winningBox) {
+        userState[userId].hasDiscount = true;
+        ctx.reply("🎉 *TABRIKLAYMIZ! Siz 20% chegirma yutib oldingiz!* 🏆\n\nPromokod: `PROMO-2026-VIP`\nBuyurtma berishda shu kodni aytsangiz kifoya!", { parse_mode: 'Markdown' });
+    } else {
+        ctx.reply(`😢 Afsus, bu quti bo'sh chiqdi (Yutug'li quti ${winningBox}-quti edi). Keyingi safar albatta omadingiz keladi! ✨`);
+    }
+});
+
+bot.hears(['📞 Aloqa va Murojaat', '📞 Контакты', '📞 Contacts'], (ctx) => {
+    ctx.reply(
+        "📬 *Bilol | Web Developer 💻 — Biz bilan bog'lanish uchun manzillar:*\n\n" +
+        "📞 *Telefon:* `+998 (99) 321-21-22`\n" +
+        "💬 *Telegram:* @sharipoov1\n" +
+        "📸 *Instagram:* [boburivlc__7](https://instagram.com/boburivlc__7)\n" +
+        "📢 *Kanal:* [Bilol Web Developer](https://t.me/Bilolwebdeveloper)",
+        { parse_mode: 'Markdown', disable_web_page_preview: true }
+    );
+});
+
+bot.hears('🔙 Ortga', (ctx) => {
+    const userId = ctx.from.id;
+    const lang = userState[userId]?.lang || 'uz';
+    if (userState[userId]) {
+        userState[userId].waitingForName = false;
+        userState[userId].waitingForOrderDesc = false;
+        userState[userId].waitingForBudget = false;
+        userState[userId].waitingForPhone = false;
+        userState[userId].waitingForAdminPassword = false;
+    }
+    ctx.reply("Asosiy menyu:", getMainMenu(lang));
+});
+
+bot.on('contact', async (ctx) => {
+    const contact = ctx.message.contact;
+    const user = ctx.message.from;
+    const userId = ctx.from.id;
+    const state = userState[userId] || {};
+    
+    console.log("📥 Kontakt keldi, adminga yuborish boshlandi. User ID:", userId);
+
+    const fullName = state.clientFullName || user.first_name;
+    const service = state.pendingService ? state.pendingService : "Umumiy murojaat";
+    const orderDesc = state.orderDescription || "Ko'rsatilmagan";
+    const budget = state.clientBudget || "Kelishiladi";
+    const discount = state.hasDiscount ? "🎁 Chegirma: BOR (PROMO-2026-VIP)" : "Chegirma yo'q";
+
+    const escapeMd = (str) => {
+        if (!str) return '';
+        return str.replace(/[_*[\]()~`>#+-=|{}.!]/g, '\\$&');
+    };
+
+    const adminMessage = `🚨 *Bilol | Web Developer — Yangi buyurtma keldi!*\n\n` +
+                         `👤 *F.I.O:* ${escapeMd(fullName)}\n` +
+                         `📞 *Tel:* +${contact.phone_number}\n` +
+                         `🔗 *Username:* @${user.username || 'mavjud_emas'}\n` +
+                         `🆔 *Telegram ID:* \`${user.id}\`\n` +
+                         `📌 *Tanlangan xizmat:* \`${escapeMd(service)}\`\n` +
+                         `📝 *Buyurtma tafsiloti:* _"${escapeMd(orderDesc)}_\x22\n` +
+                         `💰 *Mijoz budjeti:* \`${escapeMd(budget)}\`\n` +
+                         `🏷 *Aksiya holati:* ${escapeMd(discount)}\n` +
+                         `✅ *Shartlar:* 50% oldindan to'lovga rozilik olindi`;
+
+    try {
+        await ctx.telegram.sendMessage(ADMIN_ID, adminMessage, { parse_mode: 'Markdown' });
+        console.log("✅ Xabar adminga muvaffaqiyatli yuborildi!");
+    } catch (e) {
+        try {
+            await ctx.telegram.sendMessage(ADMIN_ID, adminMessage.replace(/[*_`]/g, ''));
+            console.log("✅ Xabar Markdown'siz adminga yuborildi!");
+        } catch (err) {
+            console.log("❌ ADMINGA YUBORISHDA XATOLIK:", err.message);
+        }
+    }
+    
+    await ctx.reply("Rahmat! Ma'lumotlaringiz muvaffaqiyatli qabul qilindi. Tez orada mutaxassisimiz siz bilan bog'lanib, narxlarni kelishadi! ✅", getMainMenu(state.lang || 'uz'));
+
+    if (userState[userId]) {
+        userState[userId].pendingService = null;
+        userState[userId].clientFullName = null;
+        userState[userId].orderDescription = null;
+        userState[userId].clientBudget = null;
+        userState[userId].waitingForPhone = false;
+    }
+});
+
+bot.launch({
+    dropPendingUpdates: true
+}).then(() => {
+    console.log("🔥 Bilol | Web Developer 💻 Enterprise Bot muvaffaqiyatli ishga tushdi!");
+});
+
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
